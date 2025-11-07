@@ -279,7 +279,24 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "enter":
-		// TODO: Implement connection logic
+		if a.connectionDialog.ManualMode {
+			config, err := a.connectionDialog.GetManualConfig()
+			if err != nil {
+				// Invalid input - don't close dialog, let user fix it
+				// TODO: Show error message to user
+				return a, nil
+			}
+			// TODO: Implement connection logic with config
+			_ = config
+		} else {
+			// Get selected discovered instance
+			instance := a.connectionDialog.GetSelectedInstance()
+			if instance == nil {
+				// No instance selected
+				return a, nil
+			}
+			// TODO: Implement connection logic with discovered instance
+		}
 		a.showConnectionDialog = false
 		return a, nil
 
