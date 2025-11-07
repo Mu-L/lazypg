@@ -1,0 +1,36 @@
+# lazypg default configuration
+
+general:
+  auto_connect_last: false
+  confirm_destructive_ops: true
+  default_limit: 100
+
+ui:
+  theme: "default"
+  mouse_enabled: true
+  panel_width_ratio: 25
+  show_breadcrumbs: true
+  command_palette_key: "ctrl+k"
+
+editor:
+  tab_size: 2
+  use_spaces: true
+  auto_complete: true
+  format_on_save: false
+
+data:
+  virtual_scroll_buffer: 100
+  max_cell_display_length: 100
+  jsonb_auto_format: true
+  large_table_threshold: 1000000
+
+history:
+  enabled: true
+  max_entries: 1000
+  persist: true
+  save_failed_queries: true
+
+performance:
+  connection_pool_size: 10
+  query_timeout: 30000
+  metadata_cache_ttl: 300

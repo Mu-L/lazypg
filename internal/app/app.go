@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
 )
@@ -10,23 +11,32 @@ import (
 // App is the main application model
 type App struct {
 	state      models.AppState
+	config     *config.Config
 	leftPanel  components.Panel
 	rightPanel components.Panel
 }
 
-// New creates a new App instance
-func New() *App {
+// New creates a new App instance with config
+func New(cfg *config.Config) *App {
+	state := models.NewAppState()
+
+	// Apply config to state
+	if cfg != nil && cfg.UI.PanelWidthRatio > 0 && cfg.UI.PanelWidthRatio < 100 {
+		state.LeftPanelWidth = cfg.UI.PanelWidthRatio
+	}
+
 	app := &App{
-		state: models.NewAppState(),
+		state:  state,
+		config: cfg,
 		leftPanel: components.Panel{
-			Title: "Navigation",
+			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
-			Style: lipgloss.NewStyle().BorderForeground(lipgloss.Color("62")),
+			Style:   lipgloss.NewStyle().BorderForeground(lipgloss.Color("62")),
 		},
 		rightPanel: components.Panel{
-			Title: "Content",
+			Title:   "Content",
 			Content: "Select a database object to view",
-			Style: lipgloss.NewStyle().BorderForeground(lipgloss.Color("240")),
+			Style:   lipgloss.NewStyle().BorderForeground(lipgloss.Color("240")),
 		},
 	}
 
