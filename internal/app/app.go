@@ -16,7 +16,7 @@ type App struct {
 
 // New creates a new App instance
 func New() *App {
-	return &App{
+	app := &App{
 		state: models.NewAppState(),
 		leftPanel: components.Panel{
 			Title: "Navigation",
@@ -29,6 +29,12 @@ func New() *App {
 			Style: lipgloss.NewStyle().BorderForeground(lipgloss.Color("240")),
 		},
 	}
+
+	// Set initial panel dimensions and styles
+	app.updatePanelDimensions()
+	app.updatePanelStyles()
+
+	return app
 }
 
 // Init implements tea.Model
@@ -62,13 +68,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
+	// Calculate status bar content dynamically
+	topBarLeft := "lazypg"
+	topBarRight := "⌘K"
+	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
+
 	// Top bar
 	topBar := lipgloss.NewStyle().
 		Width(a.state.Width).
 		Background(lipgloss.Color("62")).
 		Foreground(lipgloss.Color("230")).
 		Padding(0, 2).
-		Render("lazypg                                                      ⌘K")
+		Render(topBarContent)
+
+	// Calculate bottom bar content dynamically
+	bottomBarLeft := "[tab] Switch panel | [q] Quit"
+	bottomBarRight := "⌘K Command"
+	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
 	// Bottom bar
 	bottomBar := lipgloss.NewStyle().
@@ -76,7 +92,7 @@ func (a *App) View() string {
 		Background(lipgloss.Color("236")).
 		Foreground(lipgloss.Color("250")).
 		Padding(0, 2).
-		Render("[tab] Switch panel | [q] Quit                      ⌘K Command")
+		Render(bottomBarContent)
 
 	// Panels side by side
 	panels := lipgloss.JoinHorizontal(
@@ -100,20 +116,28 @@ func (a *App) updatePanelDimensions() {
 		return
 	}
 
-	// Reserve space for top and bottom bars (3 lines each with padding)
-	contentHeight := a.state.Height - 3
+	// Reserve space for top bar (1 line) and bottom bar (1 line)
+	// Total: 2 lines, leaving Height - 2 for panels
+	contentHeight := a.state.Height - 2
 	if contentHeight < 5 {
 		contentHeight = 5
 	}
 
 	// Calculate panel widths
+	// Each panel has a border (2 chars wide: left + right borders)
+	// Total border width: 4 chars (2 per panel)
 	leftWidth := (a.state.Width * a.state.LeftPanelWidth) / 100
 	if leftWidth < 20 {
 		leftWidth = 20
 	}
-	rightWidth := a.state.Width - leftWidth - 2 // Account for borders
+
+	// Right panel gets remaining width after accounting for left panel and both borders
+	// Subtract 4 to account for borders on both panels (2 chars each)
+	rightWidth := a.state.Width - leftWidth - 4
 	if rightWidth < 20 {
 		rightWidth = 20
+		// If right panel is too small, reduce left panel width
+		leftWidth = a.state.Width - rightWidth - 4
 	}
 
 	a.leftPanel.Width = leftWidth
@@ -134,4 +158,32 @@ func (a *App) updatePanelStyles() {
 		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(unfocusedColor)
 		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(focusedColor)
 	}
+}
+
+// formatStatusBar formats a status bar with left and right aligned content
+func (a *App) formatStatusBar(left, right string) string {
+	// Account for padding (2 chars on each side = 4 total)
+	availableWidth := a.state.Width - 4
+	if availableWidth < 0 {
+		availableWidth = 0
+	}
+
+	leftLen := len(left)
+	rightLen := len(right)
+
+	// If content is too wide, truncate
+	if leftLen+rightLen > availableWidth {
+		if availableWidth > rightLen {
+			return left[:availableWidth-rightLen] + right
+		}
+		return left[:availableWidth]
+	}
+
+	// Calculate spacing between left and right content
+	spacing := availableWidth - leftLen - rightLen
+	if spacing < 0 {
+		spacing = 0
+	}
+
+	return left + lipgloss.NewStyle().Width(spacing).Render("") + right
 }
