@@ -29,3 +29,6 @@ Thumbs.db
 .config/
 *.db
 *.log
+
+# Git worktrees
+.worktrees/
