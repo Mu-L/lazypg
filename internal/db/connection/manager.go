@@ -41,6 +41,13 @@ func (m *Manager) Connect(ctx context.Context, config models.ConnectionConfig) (
 
 	id := generateConnectionID(config)
 
+	// Close existing connection if present
+	if existing, ok := m.connections[id]; ok {
+		if existing.Pool != nil {
+			existing.Pool.Close()
+		}
+	}
+
 	pool, err := NewPool(ctx, config)
 	if err != nil {
 		conn := &Connection{
@@ -135,30 +142,36 @@ func (m *Manager) GetAll() []*Connection {
 
 // Ping tests the active connection
 func (m *Manager) Ping(ctx context.Context) error {
-	conn, err := m.GetActive()
-	if err != nil {
-		return err
+	m.mu.RLock()
+	activeID := m.active
+	conn, ok := m.connections[activeID]
+	m.mu.RUnlock()
+
+	if !ok || activeID == "" {
+		return fmt.Errorf("no active connection")
 	}
 
 	if conn.Pool == nil {
 		return fmt.Errorf("connection pool not initialized")
 	}
 
-	if err := conn.Pool.Ping(ctx); err != nil {
-		m.mu.Lock()
-		conn.Error = err
-		conn.Connected = false
-		m.mu.Unlock()
-		return err
-	}
+	err := conn.Pool.Ping(ctx)
 
 	m.mu.Lock()
-	conn.LastPing = time.Now()
-	conn.Connected = true
-	conn.Error = nil
+	// Verify connection still exists and is still active
+	if c, exists := m.connections[activeID]; exists && c == conn {
+		if err != nil {
+			c.Error = err
+			c.Connected = false
+		} else {
+			c.LastPing = time.Now()
+			c.Connected = true
+			c.Error = nil
+		}
+	}
 	m.mu.Unlock()
 
-	return nil
+	return err
 }
 
 // generateConnectionID creates a unique connection ID
