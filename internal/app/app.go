@@ -40,6 +40,10 @@ type App struct {
 
 	// Phase 3: Navigation tree
 	treeView *components.TreeView
+
+	// Table view
+	tableView    *components.TableView
+	currentTable string // "schema.table"
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -60,6 +64,22 @@ type LoadTreeMsg struct{}
 type TreeLoadedMsg struct {
 	Root *models.TreeNode
 	Err  error
+}
+
+// LoadTableDataMsg requests loading table data
+type LoadTableDataMsg struct {
+	Schema string
+	Table  string
+	Offset int
+	Limit  int
+}
+
+// TableDataLoadedMsg is sent when table data is loaded
+type TableDataLoadedMsg struct {
+	Columns   []string
+	Rows      [][]string
+	TotalRows int
+	Err       error
 }
 
 // New creates a new App instance with config
@@ -91,6 +111,7 @@ func New(cfg *config.Config) *App {
 		connectionDialog:  components.NewConnectionDialog(),
 		errorOverlay:      components.NewErrorOverlay(th),
 		treeView:          components.NewTreeView(emptyRoot, th),
+		tableView:         components.NewTableView(),
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -185,6 +206,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.treeView, cmd = a.treeView.Update(msg)
 				return a, cmd
 			}
+
+			// Handle table navigation when right panel is focused
+			if a.state.FocusedPanel == models.RightPanel && a.state.ViewMode == models.NormalMode {
+				switch msg.String() {
+				case "up", "k":
+					a.tableView.MoveSelection(-1)
+					return a, nil
+				case "down", "j":
+					a.tableView.MoveSelection(1)
+					return a, nil
+				case "ctrl+u":
+					a.tableView.PageUp()
+					return a, nil
+				case "ctrl+d":
+					a.tableView.PageDown()
+					return a, nil
+				}
+			}
 		}
 	case DiscoveryCompleteMsg:
 		// Update connection dialog with discovered instances
@@ -201,6 +240,52 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update tree view with loaded data
 		a.treeView.Root = msg.Root
+		return a, nil
+
+	case components.TreeNodeSelectedMsg:
+		// Handle table selection
+		if msg.Node != nil && msg.Node.Type == models.TreeNodeTypeTable {
+			// Parse table info from node ID: "table:db.schema.table"
+			// For now, we need to get schema and table name
+			// Since we're using schema nodes with ID "schema:db.schema", we can get parent
+			schemaNode := msg.Node.Parent
+			if schemaNode != nil && schemaNode.Type == models.TreeNodeTypeSchema {
+				schema := schemaNode.Label
+				table := msg.Node.Label
+				a.currentTable = schema + "." + table
+
+				return a, func() tea.Msg {
+					return LoadTableDataMsg{
+						Schema: schema,
+						Table:  table,
+						Offset: 0,
+						Limit:  100,
+					}
+				}
+			}
+		}
+		return a, nil
+
+	case LoadTableDataMsg:
+		return a, a.loadTableData(msg)
+
+	case TableDataLoadedMsg:
+		if msg.Err != nil {
+			a.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
+			return a, nil
+		}
+
+		// Check if this is initial load or pagination
+		if len(a.tableView.Rows) == 0 {
+			// Initial load
+			a.tableView.SetData(msg.Columns, msg.Rows, msg.TotalRows)
+			a.state.FocusedPanel = models.RightPanel
+			a.updatePanelStyles()
+		} else {
+			// Append paginated data
+			a.tableView.Rows = append(a.tableView.Rows, msg.Rows...)
+			a.tableView.TotalRows = msg.TotalRows
+		}
 		return a, nil
 
 	case tea.WindowSizeMsg:
@@ -269,6 +354,11 @@ func (a *App) renderNormalView() string {
 	a.treeView.Width = a.leftPanel.Width
 	a.treeView.Height = a.leftPanel.Height
 	a.leftPanel.Content = a.treeView.View()
+
+	// Update table view dimensions and render
+	a.tableView.Width = a.rightPanel.Width
+	a.tableView.Height = a.rightPanel.Height
+	a.rightPanel.Content = a.tableView.View()
 
 	// Panels side by side
 	panels := lipgloss.JoinHorizontal(
@@ -565,12 +655,51 @@ func (a *App) loadTree() tea.Msg {
 				schema.Name,
 			)
 			schemaNode.Selectable = true
+
+			// Load tables for this schema
+			tables, err := metadata.ListTables(ctx, conn.Pool, schema.Name)
+			if err == nil {
+				for _, table := range tables {
+					tableNode := models.NewTreeNode(
+						fmt.Sprintf("table:%s.%s.%s", currentDB, schema.Name, table.Name),
+						models.TreeNodeTypeTable,
+						table.Name,
+					)
+					tableNode.Selectable = true
+					schemaNode.AddChild(tableNode)
+				}
+				schemaNode.Loaded = true
+			}
+
 			dbNode.AddChild(schemaNode)
 		}
 		dbNode.Loaded = true
 	}
 
 	return TreeLoadedMsg{Root: root}
+}
+
+// loadTableData loads table data with pagination
+func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return TableDataLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
+		}
+
+		data, err := metadata.QueryTableData(ctx, conn.Pool, msg.Schema, msg.Table, msg.Offset, msg.Limit)
+		if err != nil {
+			return TableDataLoadedMsg{Err: err}
+		}
+
+		return TableDataLoadedMsg{
+			Columns:   data.Columns,
+			Rows:      data.Rows,
+			TotalRows: int(data.TotalRows),
+		}
+	}
 }
 
 // ShowError displays an error overlay with the given title and message
