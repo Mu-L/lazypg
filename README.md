@@ -4,7 +4,7 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 
 ## Status
 
-🚧 **In Development** - Phase 2 (Connection & Discovery) Complete
+🚧 **In Development** - Phase 3 (Data Browsing) Complete
 
 ### Completed Features
 
@@ -19,12 +19,15 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 - ✅ Auto-discovery (port scan, environment, .pgpass)
 - ✅ Connection dialog UI
 - ✅ Basic metadata queries
+- ✅ Navigation tree (databases, schemas, tables)
+- ✅ Table data viewing with virtual scrolling
+- ✅ Pagination and lazy loading
+- ✅ Interactive data navigation
 
 ### In Progress
 
-- 🔄 Navigation tree
-- 🔄 Data browsing
-- 🔄 Table viewing
+- 🔄 Structure/Indexes/Constraints tabs
+- 🔄 Advanced filtering
 
 ## Installation
 
@@ -128,13 +131,18 @@ make fmt
 - Connection manager UI
 - Metadata queries
 
-### Phase 3: Data Browsing (Next)
+### Phase 3: Data Browsing ✅
 - Navigation tree
-- Table data viewing
-- Virtual scrolling
+- Table data view
+- Virtual scrolling with pagination
+- Interactive data navigation
 
-### Phase 4+
+### Phase 4: Command Palette & Query (Next)
+- Command palette UI
 - Query execution
+- Result display
+
+### Phase 5+
 - Interactive filters
 - JSONB support
 - History and favorites
