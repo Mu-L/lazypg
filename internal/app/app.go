@@ -1,11 +1,17 @@
 package app
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"context"
+	"fmt"
+	"os"
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 	"github.com/rebeliceyang/lazypg/internal/db/discovery"
+	"github.com/rebeliceyang/lazypg/internal/db/metadata"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
 	"github.com/rebeliceyang/lazypg/internal/ui/help"
@@ -27,6 +33,33 @@ type App struct {
 	// Connection dialog
 	showConnectionDialog bool
 	connectionDialog     *components.ConnectionDialog
+
+	// Error overlay
+	showError    bool
+	errorOverlay *components.ErrorOverlay
+
+	// Phase 3: Navigation tree
+	treeView *components.TreeView
+}
+
+// DiscoveryCompleteMsg is sent when discovery completes
+type DiscoveryCompleteMsg struct {
+	Instances []models.DiscoveredInstance
+}
+
+// ErrorMsg is sent when an error occurs
+type ErrorMsg struct {
+	Title   string
+	Message string
+}
+
+// LoadTreeMsg requests loading the navigation tree
+type LoadTreeMsg struct{}
+
+// TreeLoadedMsg is sent when tree data is loaded
+type TreeLoadedMsg struct {
+	Root *models.TreeNode
+	Err  error
 }
 
 // New creates a new App instance with config
@@ -45,6 +78,10 @@ func New(cfg *config.Config) *App {
 		state.LeftPanelWidth = cfg.UI.PanelWidthRatio
 	}
 
+	// Create empty tree root
+	emptyRoot := models.NewTreeNode("root", models.TreeNodeTypeRoot, "Databases")
+	emptyRoot.Expanded = true
+
 	app := &App{
 		state:             state,
 		config:            cfg,
@@ -52,6 +89,8 @@ func New(cfg *config.Config) *App {
 		connectionManager: connection.NewManager(),
 		discoverer:        discovery.NewDiscoverer(),
 		connectionDialog:  components.NewConnectionDialog(),
+		errorOverlay:      components.NewErrorOverlay(th),
+		treeView:          components.NewTreeView(emptyRoot, th),
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -79,8 +118,28 @@ func (a *App) Init() tea.Cmd {
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case ErrorMsg:
+		// Handle error messages
+		a.ShowError(msg.Title, msg.Message)
+		return a, nil
+
 	case tea.KeyMsg:
-		// Handle connection dialog first if visible
+		// Handle error overlay dismissal first if visible
+		if a.showError {
+			key := msg.String()
+			if key == "esc" || key == "enter" {
+				a.DismissError()
+				return a, nil
+			}
+			// Allow quit keys to pass through even when error is showing
+			if key == "q" || key == "ctrl+c" {
+				return a, tea.Quit
+			}
+			// Consume all other keys when error is showing
+			return a, nil
+		}
+
+		// Handle connection dialog if visible
 		if a.showConnectionDialog {
 			return a.handleConnectionDialog(msg)
 		}
@@ -106,10 +165,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.state.ViewMode = models.NormalMode
 			}
 		case "c":
-			// Open connection dialog
+			// Open connection dialog and trigger discovery
 			a.showConnectionDialog = true
-			// TODO: Trigger discovery
-			return a, nil
+			return a, a.triggerDiscovery()
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
@@ -120,7 +178,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				a.updatePanelStyles()
 			}
+		default:
+			// Handle tree navigation when left panel is focused
+			if a.state.FocusedPanel == models.LeftPanel && a.state.ViewMode == models.NormalMode {
+				var cmd tea.Cmd
+				a.treeView, cmd = a.treeView.Update(msg)
+				return a, cmd
+			}
 		}
+	case DiscoveryCompleteMsg:
+		// Update connection dialog with discovered instances
+		a.connectionDialog.DiscoveredInstances = msg.Instances
+		return a, nil
+
+	case LoadTreeMsg:
+		return a, a.loadTree
+
+	case TreeLoadedMsg:
+		if msg.Err != nil {
+			a.ShowError("Database Error", fmt.Sprintf("Failed to load database structure:\n\n%v", msg.Err))
+			return a, nil
+		}
+		// Update tree view with loaded data
+		a.treeView.Root = msg.Root
+		return a, nil
+
 	case tea.WindowSizeMsg:
 		a.state.Width = msg.Width
 		a.state.Height = msg.Height
@@ -131,6 +213,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
+	// If error overlay is showing, render it centered on top of everything
+	if a.showError {
+		return lipgloss.Place(
+			a.state.Width, a.state.Height,
+			lipgloss.Center, lipgloss.Center,
+			a.errorOverlay.View(),
+		)
+	}
+
 	// If connection dialog is showing, render it
 	if a.showConnectionDialog {
 		return a.renderConnectionDialog()
@@ -140,6 +231,12 @@ func (a *App) View() string {
 	if a.state.ViewMode == models.HelpMode {
 		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
 	}
+
+	return a.renderNormalView()
+}
+
+// renderNormalView renders the normal application view
+func (a *App) renderNormalView() string {
 
 	// Normal view rendering
 	// Calculate status bar content dynamically
@@ -167,6 +264,11 @@ func (a *App) View() string {
 		Foreground(a.theme.Foreground).
 		Padding(0, 2).
 		Render(bottomBarContent)
+
+	// Update tree view dimensions and render
+	a.treeView.Width = a.leftPanel.Width
+	a.treeView.Height = a.leftPanel.Height
+	a.leftPanel.Content = a.treeView.View()
 
 	// Panels side by side
 	panels := lipgloss.JoinHorizontal(
@@ -282,12 +384,41 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.connectionDialog.ManualMode {
 			config, err := a.connectionDialog.GetManualConfig()
 			if err != nil {
-				// Invalid input - don't close dialog, let user fix it
-				// TODO: Show error message to user
+				// Invalid input - show error and don't close dialog
+				a.ShowError("Invalid Configuration", fmt.Sprintf("Could not parse connection configuration\n\nError: %v", err))
 				return a, nil
 			}
-			// TODO: Implement connection logic with config
-			_ = config
+
+			// Connect using manual configuration
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			connID, err := a.connectionManager.Connect(ctx, config)
+			if err != nil {
+				// Show error overlay
+				a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
+					config.Host, config.Port, err))
+				return a, nil
+			}
+
+			// Update active connection in state
+			conn, err := a.connectionManager.GetActive()
+			if err == nil && conn != nil {
+				a.state.ActiveConnection = &models.Connection{
+					ID:          connID,
+					Config:      config,
+					Connected:   conn.Connected,
+					ConnectedAt: conn.ConnectedAt,
+					LastPing:    conn.LastPing,
+					Error:       conn.Error,
+				}
+			}
+
+			// Trigger tree loading
+			a.showConnectionDialog = false
+			return a, func() tea.Msg {
+				return LoadTreeMsg{}
+			}
 		} else {
 			// Get selected discovered instance
 			instance := a.connectionDialog.GetSelectedInstance()
@@ -295,8 +426,52 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// No instance selected
 				return a, nil
 			}
-			// TODO: Implement connection logic with discovered instance
+
+			// Create connection config from discovered instance
+			// Note: We'll need to prompt for database/user/password in future
+			// For now, use common defaults
+			config := models.ConnectionConfig{
+				Host:     instance.Host,
+				Port:     instance.Port,
+				Database: "postgres", // Default database
+				User:     os.Getenv("USER"), // Current user
+				Password: "", // No password for now
+				SSLMode:  "prefer",
+			}
+
+			// Connect using discovered instance
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			connID, err := a.connectionManager.Connect(ctx, config)
+			if err != nil {
+				// Show error overlay
+				a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
+					config.Host, config.Port, err))
+				return a, nil
+			}
+
+			// Update active connection in state
+			conn, err := a.connectionManager.GetActive()
+			if err == nil && conn != nil {
+				a.state.ActiveConnection = &models.Connection{
+					ID:          connID,
+					Config:      config,
+					Connected:   conn.Connected,
+					ConnectedAt: conn.ConnectedAt,
+					LastPing:    conn.LastPing,
+					Error:       conn.Error,
+				}
+			}
+
+			// Trigger tree loading
+			a.showConnectionDialog = false
+			return a, func() tea.Msg {
+				return LoadTreeMsg{}
+			}
 		}
+
+		// Should not reach here
 		a.showConnectionDialog = false
 		return a, nil
 
@@ -345,4 +520,66 @@ func (a *App) renderConnectionDialog() string {
 		Padding(verticalPadding, 0, 0, horizontalPadding)
 
 	return style.Render(dialog)
+}
+
+// triggerDiscovery runs discovery in the background and returns a command
+func (a *App) triggerDiscovery() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		instances := a.discoverer.DiscoverAll(ctx)
+		return DiscoveryCompleteMsg{Instances: instances}
+	}
+}
+
+// loadTree loads the database structure and builds the navigation tree
+func (a *App) loadTree() tea.Msg {
+	ctx := context.Background()
+
+	conn, err := a.connectionManager.GetActive()
+	if err != nil {
+		return TreeLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
+	}
+
+	// Get current database name
+	currentDB := conn.Config.Database
+
+	// Build simple tree with just current database for now
+	// Later we'll expand this to load schemas and tables
+	root := models.BuildDatabaseTree([]string{currentDB}, currentDB)
+
+	// Load schemas for the current database
+	schemas, err := metadata.ListSchemas(ctx, conn.Pool)
+	if err != nil {
+		return TreeLoadedMsg{Err: fmt.Errorf("failed to load schemas: %w", err)}
+	}
+
+	// Find the database node
+	dbNode := root.FindByID(fmt.Sprintf("db:%s", currentDB))
+	if dbNode != nil {
+		// Add schema nodes as children
+		for _, schema := range schemas {
+			schemaNode := models.NewTreeNode(
+				fmt.Sprintf("schema:%s.%s", currentDB, schema.Name),
+				models.TreeNodeTypeSchema,
+				schema.Name,
+			)
+			schemaNode.Selectable = true
+			dbNode.AddChild(schemaNode)
+		}
+		dbNode.Loaded = true
+	}
+
+	return TreeLoadedMsg{Root: root}
+}
+
+// ShowError displays an error overlay with the given title and message
+func (a *App) ShowError(title, message string) {
+	a.errorOverlay.SetError(title, message)
+	a.showError = true
+}
+
+// DismissError hides the error overlay
+func (a *App) DismissError() {
+	a.showError = false
 }
