@@ -17,6 +17,7 @@ func GetGlobalKeys() []KeyBinding {
 	return []KeyBinding{
 		{"?", "Toggle help"},
 		{"q, Ctrl+C", "Quit application"},
+		{"Esc/Enter", "Dismiss error"},
 		{"Ctrl+K", "Open command palette"},
 		{"Ctrl+P", "Quick query"},
 		{"Tab", "Switch panel focus"},

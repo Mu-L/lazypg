@@ -14,6 +14,12 @@ type AppState struct {
 	Databases         []string
 	CurrentDatabase   string
 	CurrentSchema     string
+
+	// Navigation tree state (Phase 3)
+	TreeRoot         *TreeNode   // Root of the navigation tree
+	TreeSelected     *TreeNode   // Currently selected node
+	TreeCursorIndex  int         // Cursor position in flat list
+	TreeVisibleNodes []*TreeNode // Cached flat list of visible nodes
 }
 
 // PanelType identifies which panel is focused
