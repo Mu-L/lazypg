@@ -80,6 +80,7 @@ type TableDataLoadedMsg struct {
 	Columns   []string
 	Rows      [][]string
 	TotalRows int
+	Offset    int   // Offset used in the query (0 for initial load)
 	Err       error
 }
 
@@ -294,10 +295,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Check if this is initial load (offset 0) or pagination
-		// We need to check both empty rows AND if columns changed (new table selected)
+		// Check if this is initial load or pagination
+		// Initial load if:
+		// 1. No existing rows (first load ever)
+		// 2. Offset is 0 (fresh load request, even for same table)
+		// 3. Columns changed (different table selected)
 		isInitialLoad := len(a.tableView.Rows) == 0 ||
-			len(msg.Columns) > 0 && len(a.tableView.Columns) > 0 && msg.Columns[0] != a.tableView.Columns[0]
+			msg.Offset == 0 ||
+			(len(msg.Columns) > 0 && len(a.tableView.Columns) > 0 && msg.Columns[0] != a.tableView.Columns[0])
 
 		if isInitialLoad {
 			// Initial load - replace all data
@@ -753,6 +758,7 @@ func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
 			Columns:   data.Columns,
 			Rows:      data.Rows,
 			TotalRows: int(data.TotalRows),
+			Offset:    msg.Offset,
 		}
 	}
 }
