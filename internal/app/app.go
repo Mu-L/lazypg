@@ -396,13 +396,23 @@ func (a *App) renderNormalView() string {
 		Render(bottomBarContent)
 
 	// Update tree view dimensions and render
+	// Panel content height = panel height - 2 (borders) - 1 (title if present)
+	treeContentHeight := a.leftPanel.Height - 2
+	if a.leftPanel.Title != "" {
+		treeContentHeight -= 1
+	}
 	a.treeView.Width = a.leftPanel.Width
-	a.treeView.Height = a.leftPanel.Height
+	a.treeView.Height = treeContentHeight
 	a.leftPanel.Content = a.treeView.View()
 
 	// Update table view dimensions and render
+	// Panel content height = panel height - 2 (borders) - 1 (title if present)
+	tableContentHeight := a.rightPanel.Height - 2
+	if a.rightPanel.Title != "" {
+		tableContentHeight -= 1
+	}
 	a.tableView.Width = a.rightPanel.Width
-	a.tableView.Height = a.rightPanel.Height
+	a.tableView.Height = tableContentHeight
 	a.rightPanel.Content = a.tableView.View()
 
 	// Panels side by side
