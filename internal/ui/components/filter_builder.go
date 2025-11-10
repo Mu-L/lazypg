@@ -34,6 +34,7 @@ type FilterBuilder struct {
 	columnInput     string
 	operatorIndex   int
 	valueInput      string
+	jsonbPath       string // For JSONB path input (e.g., $.user.name)
 	validationError string
 
 	// UI elements
@@ -205,7 +206,20 @@ func (fb *FilterBuilder) handleValueMode(msg tea.KeyMsg) (*FilterBuilder, tea.Cm
 	case "esc":
 		fb.editMode = "operator"
 		fb.valueInput = ""
+		fb.jsonbPath = ""
 	case "enter":
+		// Check if this is a JSONB operator and handle path extraction
+		selectedOp := fb.availableOps[fb.operatorIndex]
+		if selectedOp == models.OpContains ||
+		   selectedOp == models.OpContainedBy ||
+		   selectedOp == models.OpHasKey {
+			// For JSONB operators, check if value looks like a path
+			if strings.HasPrefix(fb.valueInput, "$.") {
+				// This is a path, store it separately
+				fb.jsonbPath = fb.valueInput
+			}
+		}
+
 		// Add condition
 		fb.filter.RootGroup.Conditions = append(fb.filter.RootGroup.Conditions, models.FilterCondition{
 			Column:   fb.selectedColumn.Name,
@@ -215,6 +229,7 @@ func (fb *FilterBuilder) handleValueMode(msg tea.KeyMsg) (*FilterBuilder, tea.Cm
 		})
 		fb.editMode = ""
 		fb.valueInput = ""
+		fb.jsonbPath = ""
 		fb.updatePreview()
 	case "backspace":
 		if len(fb.valueInput) > 0 {

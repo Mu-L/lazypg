@@ -84,9 +84,16 @@ func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (s
 		// TODO: Properly implement IN/NOT IN with array expansion
 		// Current implementation is invalid SQL and needs proper handling
 		return "", nil, fmt.Errorf("IN/NOT IN operators not yet implemented")
-	case models.OpContains, models.OpContainedBy, models.OpHasKey:
-		// JSONB operators
-		return fmt.Sprintf("%s %s $%d", column, cond.Operator, paramIndex), []interface{}{cond.Value}, nil
+	case models.OpContains:
+		// JSONB @> operator
+		// If value is a string, treat it as JSON literal
+		return fmt.Sprintf(`%s @> $%d::jsonb`, column, paramIndex), []interface{}{cond.Value}, nil
+	case models.OpContainedBy:
+		// JSONB <@ operator
+		return fmt.Sprintf(`%s <@ $%d::jsonb`, column, paramIndex), []interface{}{cond.Value}, nil
+	case models.OpHasKey:
+		// JSONB ? operator (has key)
+		return fmt.Sprintf(`%s ? $%d`, column, paramIndex), []interface{}{cond.Value}, nil
 	case models.OpArrayOverlap:
 		return fmt.Sprintf("%s && $%d", column, paramIndex), []interface{}{cond.Value}, nil
 	default:
