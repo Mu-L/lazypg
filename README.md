@@ -4,7 +4,7 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 
 ## Status
 
-🚧 **In Development** - Phase 5 (Interactive Filtering) Complete
+🚧 **In Development** - Phase 6 (JSONB Support) Complete
 
 ### Completed Features
 
@@ -26,6 +26,10 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 - ✅ Interactive filter builder with type-aware operators
 - ✅ Quick filter from cell (Ctrl+F)
 - ✅ SQL preview and validation
+- ✅ JSONB detection and formatting
+- ✅ Three-mode JSONB viewer (Formatted/Tree/Query)
+- ✅ Path extraction algorithm
+- ✅ JSONB filtering operators (@>, <@, ?)
 
 ### In Progress
 
@@ -62,6 +66,17 @@ make run
 Press `f` while viewing a table to open the interactive filter builder, or `Ctrl+F` to quickly filter by the selected cell.
 
 See [docs/features/filtering.md](docs/features/filtering.md) for detailed documentation.
+
+## JSONB Support
+
+Press `j` on a cell containing JSONB data to open the JSONB viewer with three modes:
+- **Formatted View** (1) - Pretty-printed JSON
+- **Tree View** (2) - Interactive tree navigation
+- **Query View** (3) - PostgreSQL query examples
+
+The filter builder supports JSONB operators (@>, <@, ?) for advanced filtering.
+
+See [docs/features/jsonb.md](docs/features/jsonb.md) for detailed documentation.
 
 ## Configuration
 
@@ -152,15 +167,21 @@ make fmt
 - Filter preview and validation
 - Clear filter functionality
 
+### Phase 6: JSONB Support ✅
+- JSONB detection and formatting
+- Three-mode viewer (Formatted/Tree/Query)
+- Path extraction algorithm
+- JSONB filtering operators (@>, <@, ?)
+
 ### Phase 4: Command Palette & Query (Next)
 - Command palette UI
 - Query execution
 - Result display
 
-### Phase 6+
-- JSONB support
+### Phase 7+
 - History and favorites
 - Export/Import
+- Structure/Indexes/Constraints tabs
 
 See [design document](docs/plans/2025-11-07-lazypg-design.md) for complete roadmap.
 
