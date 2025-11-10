@@ -1,0 +1,28 @@
+# Example favorites.yaml structure
+- id: "550e8400-e29b-41d4-a716-446655440000"
+  name: "Active Users"
+  description: "Get all active users from the last 30 days"
+  query: "SELECT * FROM users WHERE last_login > NOW() - INTERVAL '30 days'"
+  tags:
+    - users
+    - active
+  connection: "production"
+  database: "myapp"
+  created_at: 2025-11-10T10:00:00Z
+  updated_at: 2025-11-10T10:00:00Z
+  usage_count: 5
+  last_used: 2025-11-10T14:30:00Z
+
+- id: "660e8400-e29b-41d4-a716-446655440001"
+  name: "Orders This Month"
+  description: "All orders placed in the current month"
+  query: "SELECT * FROM orders WHERE created_at >= date_trunc('month', CURRENT_DATE)"
+  tags:
+    - orders
+    - reports
+  connection: "production"
+  database: "sales"
+  created_at: 2025-11-10T11:00:00Z
+  updated_at: 2025-11-10T11:00:00Z
+  usage_count: 12
+  last_used: 2025-11-10T15:00:00Z
