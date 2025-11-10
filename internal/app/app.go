@@ -391,11 +391,16 @@ func (a *App) renderNormalView() string {
 		Render("? help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	topBar := lipgloss.NewStyle().
-		Width(a.state.Width).
+	// Create top bar as a bordered box
+	topBarStyle := lipgloss.NewStyle().
+		Width(a.state.Width - 4). // Account for borders
 		Background(a.theme.Selection).
 		Foreground(a.theme.Foreground).
-		Render(topBarContent)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(a.theme.Border).
+		Padding(0, 1)
+
+	topBar := topBarStyle.Render(topBarContent)
 
 	// Context-sensitive bottom bar
 	var bottomBarLeft string
@@ -428,11 +433,16 @@ func (a *App) renderNormalView() string {
 
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	bottomBar := lipgloss.NewStyle().
-		Width(a.state.Width).
+	// Create bottom bar as a bordered box
+	bottomBarStyle := lipgloss.NewStyle().
+		Width(a.state.Width - 4). // Account for borders
 		Background(a.theme.Selection).
 		Foreground(a.theme.Foreground).
-		Render(bottomBarContent)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(a.theme.Border).
+		Padding(0, 1)
+
+	bottomBar := bottomBarStyle.Render(bottomBarContent)
 
 	// Update tree view dimensions and render
 	// Panel content height = panel height - 2 (borders) - 1 (title if present)
@@ -476,9 +486,9 @@ func (a *App) updatePanelDimensions() {
 		return
 	}
 
-	// Reserve space for top bar (1 line) and bottom bar (1 line)
-	// Total: 2 lines, leaving Height - 2 for panels
-	contentHeight := a.state.Height - 2
+	// Reserve space for top bar (3 lines with border) and bottom bar (3 lines with border)
+	// Total: 6 lines, leaving Height - 6 for panels
+	contentHeight := a.state.Height - 6
 	if contentHeight < 5 {
 		contentHeight = 5
 	}
