@@ -242,6 +242,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "ctrl+d":
 					a.tableView.PageDown()
 					return a, nil
+				case "enter", " ":
+					// Consume enter/space in table view (no action needed for now)
+					// This prevents the key from propagating to tree view
+					return a, nil
 				}
 			}
 		}
