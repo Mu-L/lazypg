@@ -91,8 +91,9 @@ func (tv *TreeView) View() string {
 	}
 
 	// Calculate viewport dimensions
-	// Subtract 2 for borders, 2 for title/help
-	viewHeight := tv.Height - 4
+	// Height is already the content area height from the panel
+	// Just use it directly, no need to subtract anything
+	viewHeight := tv.Height
 	if viewHeight < 1 {
 		viewHeight = 1
 	}

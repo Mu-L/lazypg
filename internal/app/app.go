@@ -17,6 +17,7 @@ import (
 	"github.com/rebeliceyang/lazypg/internal/db/discovery"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
 	"github.com/rebeliceyang/lazypg/internal/db/query"
+	"github.com/rebeliceyang/lazypg/internal/favorites"
 	filterBuilder "github.com/rebeliceyang/lazypg/internal/filter"
 	"github.com/rebeliceyang/lazypg/internal/history"
 	"github.com/rebeliceyang/lazypg/internal/jsonb"
@@ -73,6 +74,11 @@ type App struct {
 	// JSONB viewer
 	showJSONBViewer bool
 	jsonbViewer     *components.JSONBViewer
+
+	// Favorites
+	showFavorites    bool
+	favoritesManager *favorites.Manager
+	favoritesDialog  *components.FavoritesDialog
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -159,11 +165,20 @@ func New(cfg *config.Config) *App {
 		log.Printf("Warning: Could not open history: %v", err)
 	}
 
+	// Initialize favorites manager
+	favoritesManager, err := favorites.NewManager(configDir)
+	if err != nil {
+		log.Printf("Warning: Could not initialize favorites: %v", err)
+	}
+
 	// Initialize filter builder
 	filterBuilder := components.NewFilterBuilder(th)
 
 	// Initialize JSONB viewer
 	jsonbViewer := components.NewJSONBViewer(th)
+
+	// Initialize favorites dialog
+	favoritesDialog := components.NewFavoritesDialog(th)
 
 	app := &App{
 		state:             state,
@@ -184,6 +199,9 @@ func New(cfg *config.Config) *App {
 		activeFilter:      nil,
 		showJSONBViewer:   false,
 		jsonbViewer:       jsonbViewer,
+		showFavorites:     false,
+		favoritesManager:  favoritesManager,
+		favoritesDialog:   favoritesDialog,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -238,6 +256,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.HistoryCommandMsg:
 		// TODO: Implement in Task 7
 		a.ShowError("Not Implemented", "Query history will be implemented in Task 7")
+		return a, nil
+
+	case commands.FavoritesCommandMsg:
+		// Open favorites dialog
+		if a.favoritesManager != nil {
+			a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+		}
+		a.showFavorites = true
 		return a, nil
 
 	case components.ExecuteQueryMsg:
@@ -328,6 +354,83 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showJSONBViewer = false
 		return a, nil
 
+	case components.ExecuteFavoriteMsg:
+		// Execute favorite query
+		if a.state.ActiveConnection == nil {
+			a.ShowError("No Connection", "Please connect to a database first")
+			return a, nil
+		}
+
+		// Record usage
+		if a.favoritesManager != nil {
+			_ = a.favoritesManager.RecordUsage(msg.Favorite.ID)
+		}
+
+		// Execute query asynchronously
+		a.showFavorites = false
+		return a, func() tea.Msg {
+			conn, err := a.connectionManager.GetActive()
+			if err != nil {
+				return QueryResultMsg{
+					SQL: msg.Favorite.Query,
+					Result: models.QueryResult{
+						Error: fmt.Errorf("failed to get connection: %w", err),
+					},
+				}
+			}
+
+			result := query.Execute(context.Background(), conn.Pool.GetPool(), msg.Favorite.Query)
+			return QueryResultMsg{
+				SQL:    msg.Favorite.Query,
+				Result: result,
+			}
+		}
+
+	case components.CloseFavoritesDialogMsg:
+		a.showFavorites = false
+		return a, nil
+
+	case components.AddFavoriteMsg:
+		if a.favoritesManager != nil {
+			conn := ""
+			if a.state.ActiveConnection != nil {
+				conn = a.state.ActiveConnection.Config.Name
+			}
+			db := a.state.CurrentDatabase
+			_, err := a.favoritesManager.Add(msg.Name, msg.Description, msg.Query, conn, db, msg.Tags)
+			if err != nil {
+				a.ShowError("Add Favorite Failed", err.Error())
+			} else {
+				// Refresh the dialog
+				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+			}
+		}
+		return a, nil
+
+	case components.EditFavoriteMsg:
+		if a.favoritesManager != nil {
+			err := a.favoritesManager.Update(msg.FavoriteID, msg.Name, msg.Description, msg.Query, msg.Tags)
+			if err != nil {
+				a.ShowError("Edit Favorite Failed", err.Error())
+			} else {
+				// Refresh the dialog
+				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+			}
+		}
+		return a, nil
+
+	case components.DeleteFavoriteMsg:
+		if a.favoritesManager != nil {
+			err := a.favoritesManager.Delete(msg.FavoriteID)
+			if err != nil {
+				a.ShowError("Delete Favorite Failed", err.Error())
+			} else {
+				// Refresh the dialog
+				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+			}
+		}
+		return a, nil
+
 	case ErrorMsg:
 		// Handle error messages
 		a.ShowError(msg.Title, msg.Message)
@@ -374,6 +477,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleJSONBViewer(msg)
 		}
 
+		// Handle favorites dialog if visible
+		if a.showFavorites {
+			return a.handleFavoritesDialog(msg)
+		}
+
 		switch msg.String() {
 		case "ctrl+p":
 			// Open quick query
@@ -383,6 +491,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open command palette and populate with commands including history
 			a.commandPalette.SetCommands(a.getCommandsWithHistory())
 			a.showCommandPalette = true
+			return a, nil
+		case "ctrl+b":
+			// Open favorites dialog
+			if a.favoritesManager != nil {
+				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+			}
+			a.showFavorites = true
 			return a, nil
 		case "q", "ctrl+c":
 			// Don't quit if in help mode, exit help instead
@@ -856,6 +971,19 @@ func (a *App) renderNormalView() string {
 		)
 	}
 
+	// Render favorites dialog if visible
+	if a.showFavorites {
+		mainView = lipgloss.Place(
+			a.state.Width,
+			a.state.Height,
+			lipgloss.Center,
+			lipgloss.Center,
+			a.favoritesDialog.View(),
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+		)
+	}
+
 	return mainView
 }
 
@@ -1160,6 +1288,13 @@ func (a *App) handleFilterBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleJSONBViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.jsonbViewer, cmd = a.jsonbViewer.Update(msg)
+	return a, cmd
+}
+
+// handleFavoritesDialog handles key events when favorites dialog is visible
+func (a *App) handleFavoritesDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.favoritesDialog, cmd = a.favoritesDialog.Update(msg)
 	return a, cmd
 }
 

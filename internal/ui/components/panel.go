@@ -53,9 +53,16 @@ func (p *Panel) View() string {
 	}
 
 	// Apply border and sizing
+	// Note: lipgloss Height() sets content height, then adds borders on top
+	// So if we want total height of p.Height, we need to subtract border height (2)
+	innerHeight := p.Height - 2 // Subtract top and bottom borders
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
 	style := p.Style.
 		Width(p.Width).
-		Height(p.Height).
+		Height(innerHeight). // This is the inner content height
 		Border(borderStyle).
 		Padding(0, 1) // Horizontal padding inside border
 

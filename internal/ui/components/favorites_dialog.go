@@ -27,6 +27,28 @@ type ExecuteFavoriteMsg struct {
 // CloseFavoritesDialogMsg is sent when dialog should close
 type CloseFavoritesDialogMsg struct{}
 
+// AddFavoriteMsg is sent when a new favorite should be added
+type AddFavoriteMsg struct {
+	Name        string
+	Description string
+	Query       string
+	Tags        []string
+}
+
+// EditFavoriteMsg is sent when a favorite should be updated
+type EditFavoriteMsg struct {
+	FavoriteID  string
+	Name        string
+	Description string
+	Query       string
+	Tags        []string
+}
+
+// DeleteFavoriteMsg is sent when a favorite should be deleted
+type DeleteFavoriteMsg struct {
+	FavoriteID string
+}
+
 // FavoritesDialog manages favorite queries
 type FavoritesDialog struct {
 	Width  int
@@ -130,7 +152,13 @@ func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 			fd.currentField = 0
 		}
 	case "d", "x":
-		// Delete - handled by parent
+		// Delete selected favorite
+		if fd.selected < len(fd.favorites) {
+			fav := fd.favorites[fd.selected]
+			return fd, func() tea.Msg {
+				return DeleteFavoriteMsg{FavoriteID: fav.ID}
+			}
+		}
 	}
 	return fd, nil
 }
@@ -147,9 +175,46 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 		fd.deleteChar()
 	case "enter":
 		if fd.currentField == 3 {
-			// Save and close
+			// Parse tags from comma-separated string
+			tags := []string{}
+			if fd.tagsInput != "" {
+				for _, tag := range strings.Split(fd.tagsInput, ",") {
+					tag = strings.TrimSpace(tag)
+					if tag != "" {
+						tags = append(tags, tag)
+					}
+				}
+			}
+
+			// Send appropriate message based on mode
+			if fd.mode == FavoritesModeAdd {
+				cmd := func() tea.Msg {
+					return AddFavoriteMsg{
+						Name:        fd.nameInput,
+						Description: fd.descriptionInput,
+						Query:       fd.queryInput,
+						Tags:        tags,
+					}
+				}
+				fd.mode = FavoritesModeList
+				fd.clearInputs()
+				return fd, cmd
+			} else if fd.mode == FavoritesModeEdit {
+				fav := fd.favorites[fd.selected]
+				cmd := func() tea.Msg {
+					return EditFavoriteMsg{
+						FavoriteID:  fav.ID,
+						Name:        fd.nameInput,
+						Description: fd.descriptionInput,
+						Query:       fd.queryInput,
+						Tags:        tags,
+					}
+				}
+				fd.mode = FavoritesModeList
+				fd.clearInputs()
+				return fd, cmd
+			}
 			fd.mode = FavoritesModeList
-			// Parent will handle actual save
 		} else {
 			fd.currentField++
 		}
@@ -193,6 +258,14 @@ func (fd *FavoritesDialog) deleteChar() {
 			fd.tagsInput = fd.tagsInput[:len(fd.tagsInput)-1]
 		}
 	}
+}
+
+func (fd *FavoritesDialog) clearInputs() {
+	fd.nameInput = ""
+	fd.descriptionInput = ""
+	fd.queryInput = ""
+	fd.tagsInput = ""
+	fd.currentField = 0
 }
 
 // View renders the dialog

@@ -60,6 +60,11 @@ func (p *Pool) Ping(ctx context.Context) error {
 	return p.pool.Ping(ctx)
 }
 
+// GetPool returns the underlying pgxpool.Pool
+func (p *Pool) GetPool() *pgxpool.Pool {
+	return p.pool
+}
+
 // QueryResult represents a query result with columns and rows
 type QueryResult struct {
 	Columns []string
