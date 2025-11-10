@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebeliceyang/lazypg/internal/export"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"gopkg.in/yaml.v3"
 )
@@ -221,4 +222,36 @@ func (m *Manager) GetRecent(limit int) []models.Favorite {
 	}
 
 	return sorted
+}
+
+// ExportToCSV exports all favorites to a CSV file
+func (m *Manager) ExportToCSV(customPath ...string) (string, error) {
+	// Determine export path
+	path := filepath.Join(filepath.Dir(m.path), "favorites.csv")
+	if len(customPath) > 0 && customPath[0] != "" {
+		path = customPath[0]
+	}
+
+	// Export favorites
+	if err := export.ExportToCSV(m.favorites, path); err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+// ExportToJSON exports all favorites to a JSON file
+func (m *Manager) ExportToJSON(customPath ...string) (string, error) {
+	// Determine export path
+	path := filepath.Join(filepath.Dir(m.path), "favorites.json")
+	if len(customPath) > 0 && customPath[0] != "" {
+		path = customPath[0]
+	}
+
+	// Export favorites
+	if err := export.ExportToJSON(m.favorites, path); err != nil {
+		return "", err
+	}
+
+	return path, nil
 }

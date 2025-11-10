@@ -14,6 +14,8 @@ type QueryEditorCommandMsg struct{}
 type HistoryCommandMsg struct{}
 type FavoritesCommandMsg struct{}
 type SettingsCommandMsg struct{}
+type ExportFavoritesCSVMsg struct{}
+type ExportFavoritesJSONMsg struct{}
 
 // GetBuiltinCommands returns the list of built-in commands
 func GetBuiltinCommands() []models.Command {
@@ -116,6 +118,28 @@ func GetBuiltinCommands() []models.Command {
 			Tags:        []string{"config", "settings", "preferences"},
 			Action: func() tea.Msg {
 				return SettingsCommandMsg{}
+			},
+		},
+		{
+			ID:          "export-favorites-csv",
+			Type:        models.CommandTypeAction,
+			Label:       "Export Favorites to CSV",
+			Description: "Export all favorites to CSV file",
+			Icon:        "📊",
+			Tags:        []string{"export", "favorites", "csv"},
+			Action: func() tea.Msg {
+				return ExportFavoritesCSVMsg{}
+			},
+		},
+		{
+			ID:          "export-favorites-json",
+			Type:        models.CommandTypeAction,
+			Label:       "Export Favorites to JSON",
+			Description: "Export all favorites to JSON file",
+			Icon:        "📦",
+			Tags:        []string{"export", "favorites", "json"},
+			Action: func() tea.Msg {
+				return ExportFavoritesJSONMsg{}
 			},
 		},
 	}

@@ -266,6 +266,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showFavorites = true
 		return a, nil
 
+	case commands.ExportFavoritesCSVMsg:
+		// Export favorites to CSV
+		if a.favoritesManager == nil {
+			a.ShowError("Export Failed", "Favorites manager not initialized")
+			return a, nil
+		}
+
+		path, err := a.favoritesManager.ExportToCSV()
+		if err != nil {
+			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to CSV:\n\n%v", err))
+			return a, nil
+		}
+
+		// Show success notification
+		a.ShowError("✓ Export Complete", fmt.Sprintf("Favorites exported to:\n\n%s", path))
+		return a, nil
+
+	case commands.ExportFavoritesJSONMsg:
+		// Export favorites to JSON
+		if a.favoritesManager == nil {
+			a.ShowError("Export Failed", "Favorites manager not initialized")
+			return a, nil
+		}
+
+		path, err := a.favoritesManager.ExportToJSON()
+		if err != nil {
+			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to JSON:\n\n%v", err))
+			return a, nil
+		}
+
+		// Show success notification
+		a.ShowError("✓ Export Complete", fmt.Sprintf("Favorites exported to:\n\n%s", path))
+		return a, nil
+
 	case components.ExecuteQueryMsg:
 		// Handle query execution from quick query
 		if a.state.ActiveConnection == nil {
