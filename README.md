@@ -4,7 +4,7 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 
 ## Status
 
-🚧 **In Development** - Phase 3 (Data Browsing) Complete
+🚧 **In Development** - Phase 5 (Interactive Filtering) Complete
 
 ### Completed Features
 
@@ -23,11 +23,13 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 - ✅ Table data viewing with virtual scrolling
 - ✅ Pagination and lazy loading
 - ✅ Interactive data navigation
+- ✅ Interactive filter builder with type-aware operators
+- ✅ Quick filter from cell (Ctrl+F)
+- ✅ SQL preview and validation
 
 ### In Progress
 
 - 🔄 Structure/Indexes/Constraints tabs
-- 🔄 Advanced filtering
 
 ## Installation
 
@@ -54,6 +56,12 @@ make run
 2. **Help**: Press `?` to see keyboard shortcuts
 3. **Navigate**: Use `Tab` to switch between panels
 4. **Quit**: Press `q` or `Ctrl+C`
+
+## Filtering
+
+Press `f` while viewing a table to open the interactive filter builder, or `Ctrl+F` to quickly filter by the selected cell.
+
+See [docs/features/filtering.md](docs/features/filtering.md) for detailed documentation.
 
 ## Configuration
 
@@ -137,15 +145,22 @@ make fmt
 - Virtual scrolling with pagination
 - Interactive data navigation
 
+### Phase 5: Interactive Filtering ✅
+- Filter builder UI with type-aware operators
+- SQL WHERE clause generation
+- Quick filter from cell
+- Filter preview and validation
+- Clear filter functionality
+
 ### Phase 4: Command Palette & Query (Next)
 - Command palette UI
 - Query execution
 - Result display
 
-### Phase 5+
-- Interactive filters
+### Phase 6+
 - JSONB support
 - History and favorites
+- Export/Import
 
 See [design document](docs/plans/2025-11-07-lazypg-design.md) for complete roadmap.
 
