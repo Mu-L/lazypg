@@ -63,7 +63,6 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	// Database input
 	inputs[databaseField] = textinput.New()
 	inputs[databaseField].Placeholder = "postgres"
-	inputs[databaseField].SetValue("postgres")
 	inputs[databaseField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
 	inputs[databaseField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[databaseField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
@@ -73,7 +72,6 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	// User input
 	inputs[userField] = textinput.New()
 	inputs[userField].Placeholder = "postgres"
-	inputs[userField].SetValue("postgres")
 	inputs[userField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
 	inputs[userField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[userField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
@@ -325,6 +323,21 @@ func (c *ConnectionDialog) GetManualConfig() (models.ConnectionConfig, error) {
 	user := strings.TrimSpace(c.inputs[userField].Value())
 	password := c.inputs[passwordField].Value()
 
+	// Use placeholder values as defaults when fields are empty
+	if host == "" {
+		host = c.inputs[hostField].Placeholder
+	}
+	if port == "" {
+		port = c.inputs[portField].Placeholder
+	}
+	if database == "" {
+		database = c.inputs[databaseField].Placeholder
+	}
+	if user == "" {
+		user = c.inputs[userField].Placeholder
+	}
+
+	// Validate required fields after applying defaults
 	if host == "" {
 		return models.ConnectionConfig{}, fmt.Errorf("host is required")
 	}
@@ -333,10 +346,6 @@ func (c *ConnectionDialog) GetManualConfig() (models.ConnectionConfig, error) {
 	}
 	if database == "" {
 		return models.ConnectionConfig{}, fmt.Errorf("database is required")
-	}
-
-	if port == "" {
-		port = "5432"
 	}
 
 	return models.ConnectionConfig{
