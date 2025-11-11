@@ -48,7 +48,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[hostField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[hostField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	inputs[hostField].CharLimit = 100
-	inputs[hostField].Width = 50
+	inputs[hostField].Width = 40
 
 	// Port input
 	inputs[portField] = textinput.New()
@@ -58,7 +58,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[portField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[portField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	inputs[portField].CharLimit = 5
-	inputs[portField].Width = 50
+	inputs[portField].Width = 40
 
 	// Database input
 	inputs[databaseField] = textinput.New()
@@ -67,7 +67,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[databaseField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[databaseField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	inputs[databaseField].CharLimit = 100
-	inputs[databaseField].Width = 50
+	inputs[databaseField].Width = 40
 
 	// User input
 	inputs[userField] = textinput.New()
@@ -76,7 +76,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[userField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[userField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	inputs[userField].CharLimit = 100
-	inputs[userField].Width = 50
+	inputs[userField].Width = 40
 
 	// Password input
 	inputs[passwordField] = textinput.New()
@@ -87,7 +87,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[passwordField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[passwordField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	inputs[passwordField].CharLimit = 100
-	inputs[passwordField].Width = 50
+	inputs[passwordField].Width = 40
 
 	return &ConnectionDialog{
 		inputs:      inputs,
@@ -244,10 +244,10 @@ func (c *ConnectionDialog) renderManualMode() string {
 
 	sections = append(sections, "")
 
-	// Instructions
+	// Instructions - shorter to fit within MaxWidth
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6c7086"))
-	sections = append(sections, helpStyle.Render("Tab: Next Field  │  Enter: Connect  │  Ctrl+D: Discovery  │  Esc: Cancel"))
+	sections = append(sections, helpStyle.Render("Tab: Next  │  Enter: Connect  │  Ctrl+D: Back  │  Esc: Cancel"))
 
 	return strings.Join(sections, "\n")
 }
