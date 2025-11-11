@@ -1159,12 +1159,18 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "m":
+		// Only handle 'm' key in discovery mode, not in manual mode (to allow typing 'm')
 		if !a.connectionDialog.ManualMode {
 			a.connectionDialog.ToggleMode()
+			return a, nil
 		}
-		return a, nil
+		// In manual mode, pass 'm' to textinput
+		var cmd tea.Cmd
+		a.connectionDialog, cmd = a.connectionDialog.Update(msg)
+		return a, cmd
 
-	case "d":
+	case "ctrl+d":
+		// Use Ctrl+D to switch back to discovery mode to avoid conflict with typing 'd'
 		if a.connectionDialog.ManualMode {
 			a.connectionDialog.ToggleMode()
 		}

@@ -127,12 +127,12 @@ func (c *ConnectionDialog) View() string {
 		content = c.renderDiscoveryMode()
 	}
 
-	// Create compact container that fits content
+	// Create compact container with fixed width to ensure borders show properly
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#cba6f7")).
 		Padding(1, 2).
-		MaxWidth(70)
+		Width(80) // Fixed width ensures right border is visible
 
 	return lipgloss.Place(
 		c.Width,
@@ -247,7 +247,7 @@ func (c *ConnectionDialog) renderManualMode() string {
 	// Instructions
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6c7086"))
-	sections = append(sections, helpStyle.Render("Tab: Next Field  │  Enter: Connect  │  d: Discovery  │  Esc: Cancel"))
+	sections = append(sections, helpStyle.Render("Tab: Next Field  │  Enter: Connect  │  Ctrl+D: Discovery  │  Esc: Cancel"))
 
 	return strings.Join(sections, "\n")
 }
