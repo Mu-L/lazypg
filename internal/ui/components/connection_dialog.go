@@ -63,6 +63,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	// Database input
 	inputs[databaseField] = textinput.New()
 	inputs[databaseField].Placeholder = "postgres"
+	inputs[databaseField].SetValue("postgres")
 	inputs[databaseField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
 	inputs[databaseField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[databaseField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
@@ -72,6 +73,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	// User input
 	inputs[userField] = textinput.New()
 	inputs[userField].Placeholder = "postgres"
+	inputs[userField].SetValue("postgres")
 	inputs[userField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
 	inputs[userField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	inputs[userField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
