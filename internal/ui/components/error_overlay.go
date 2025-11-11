@@ -43,18 +43,18 @@ func (e *ErrorOverlay) View() string {
 		Foreground(e.Theme.Error).
 		Padding(0, 1)
 
-	// Message style
+	// Message style - use MaxWidth to constrain, not Width
 	messageStyle := lipgloss.NewStyle().
 		Foreground(e.Theme.Foreground).
 		Padding(1, 2).
-		Width(e.Width - 4)
+		MaxWidth(e.Width - 8) // Account for border (2) + padding (4) + margin (2)
 
 	// Footer style (dimmed)
 	footerStyle := lipgloss.NewStyle().
 		Faint(true).
 		Foreground(e.Theme.Foreground).
 		Align(lipgloss.Center).
-		Width(e.Width - 4)
+		MaxWidth(e.Width - 8)
 
 	// Build content
 	var content strings.Builder
@@ -64,19 +64,18 @@ func (e *ErrorOverlay) View() string {
 	content.WriteString("\n\n")
 
 	// Message - wrap text to fit width
-	wrappedMessage := wrapText(e.Message, e.Width-8)
+	wrappedMessage := wrapText(e.Message, e.Width-12) // More conservative wrapping
 	content.WriteString(messageStyle.Render(wrappedMessage))
 	content.WriteString("\n")
 
 	// Footer
 	content.WriteString(footerStyle.Render("Press Enter or Esc to dismiss"))
 
-	// Box style with error border
+	// Box style with error border - don't set Width, let it size naturally
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(e.Theme.Error).
 		Padding(1, 2).
-		Width(e.Width).
 		MaxWidth(e.Width).
 		Background(e.Theme.Background)
 

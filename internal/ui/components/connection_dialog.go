@@ -127,12 +127,12 @@ func (c *ConnectionDialog) View() string {
 		content = c.renderDiscoveryMode()
 	}
 
-	// Create compact container with fixed width to ensure borders show properly
+	// Create compact container - use MaxWidth instead of Width to avoid border overflow
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#cba6f7")).
 		Padding(1, 2).
-		Width(80) // Fixed width ensures right border is visible
+		MaxWidth(76) // MaxWidth constrains content, border adds 2 more chars (total ~78)
 
 	return lipgloss.Place(
 		c.Width,
