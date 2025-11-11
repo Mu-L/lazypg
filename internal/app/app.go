@@ -186,7 +186,7 @@ func New(cfg *config.Config) *App {
 		theme:             th,
 		connectionManager: connection.NewManager(),
 		discoverer:        discovery.NewDiscoverer(),
-		connectionDialog:  components.NewConnectionDialog(),
+		connectionDialog:  components.NewConnectionDialog(th),
 		errorOverlay:      components.NewErrorOverlay(th),
 		treeView:          components.NewTreeView(emptyRoot, th),
 		commandRegistry:   registry,
@@ -226,9 +226,12 @@ func (a *App) Init() tea.Cmd {
 	// If no active connection, automatically show connection dialog on startup
 	if a.state.ActiveConnection == nil {
 		a.showConnectionDialog = true
-		return a.triggerDiscovery()
+		return tea.Batch(
+			a.triggerDiscovery(),
+			a.connectionDialog.Init(), // Start cursor blinking
+		)
 	}
-	return nil
+	return a.connectionDialog.Init() // Always init textinput cursors
 }
 
 // Update implements tea.Model
@@ -722,7 +725,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case DiscoveryCompleteMsg:
 		// Update connection dialog with discovered instances
-		a.connectionDialog.DiscoveredInstances = msg.Instances
+		a.connectionDialog.SetDiscoveredInstances(msg.Instances)
 		return a, nil
 
 	case LoadTreeMsg:
@@ -1132,15 +1135,39 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "up", "k":
-		a.connectionDialog.MoveSelection(-1)
+		if !a.connectionDialog.ManualMode {
+			a.connectionDialog.MoveSelection(-1)
+		}
 		return a, nil
 
 	case "down", "j":
-		a.connectionDialog.MoveSelection(1)
+		if !a.connectionDialog.ManualMode {
+			a.connectionDialog.MoveSelection(1)
+		}
+		return a, nil
+
+	case "tab":
+		if a.connectionDialog.ManualMode {
+			a.connectionDialog.NextInput()
+		}
+		return a, nil
+
+	case "shift+tab":
+		if a.connectionDialog.ManualMode {
+			a.connectionDialog.PrevInput()
+		}
 		return a, nil
 
 	case "m":
-		a.connectionDialog.ManualMode = !a.connectionDialog.ManualMode
+		if !a.connectionDialog.ManualMode {
+			a.connectionDialog.ToggleMode()
+		}
+		return a, nil
+
+	case "d":
+		if a.connectionDialog.ManualMode {
+			a.connectionDialog.ToggleMode()
+		}
 		return a, nil
 
 	case "enter":
@@ -1238,20 +1265,12 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.showConnectionDialog = false
 		return a, nil
 
-	case "backspace":
-		if a.connectionDialog.ManualMode {
-			a.connectionDialog.HandleBackspace()
-		}
-		return a, nil
-
 	default:
-		// Handle text input in manual mode
+		// In manual mode, delegate to textinput for cursor and text handling
 		if a.connectionDialog.ManualMode {
-			// Only handle printable characters
-			key := msg.String()
-			if len(key) == 1 {
-				a.connectionDialog.HandleInput(rune(key[0]))
-			}
+			var cmd tea.Cmd
+			a.connectionDialog, cmd = a.connectionDialog.Update(msg)
+			return a, cmd
 		}
 		return a, nil
 	}

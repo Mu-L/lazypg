@@ -4,34 +4,114 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
 // ConnectionDialog represents a connection dialog
 type ConnectionDialog struct {
-	Width              int
-	Height             int
-	Style              lipgloss.Style
+	Width               int
+	Height              int
+	Theme               theme.Theme
 	DiscoveredInstances []models.DiscoveredInstance
-	ManualMode         bool
-	SelectedIndex      int
+	ManualMode          bool
+	SelectedIndex       int
 
-	// Manual connection fields
-	Host     string
-	Port     string
-	Database string
-	User     string
-	Password string
-	ActiveField int
+	// Text input fields for manual mode
+	inputs      []textinput.Model
+	focusIndex  int
+	cursorMode  cursor.Mode
 }
 
+const (
+	hostField = iota
+	portField
+	databaseField
+	userField
+	passwordField
+)
+
 // NewConnectionDialog creates a new connection dialog
-func NewConnectionDialog() *ConnectionDialog {
+func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
+	// Create text inputs for each field
+	inputs := make([]textinput.Model, 5)
+
+	// Host input
+	inputs[hostField] = textinput.New()
+	inputs[hostField].Placeholder = "localhost"
+	inputs[hostField].Focus()
+	inputs[hostField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+	inputs[hostField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+	inputs[hostField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
+	inputs[hostField].CharLimit = 100
+	inputs[hostField].Width = 50
+
+	// Port input
+	inputs[portField] = textinput.New()
+	inputs[portField].Placeholder = "5432"
+	inputs[portField].SetValue("5432")
+	inputs[portField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+	inputs[portField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+	inputs[portField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
+	inputs[portField].CharLimit = 5
+	inputs[portField].Width = 50
+
+	// Database input
+	inputs[databaseField] = textinput.New()
+	inputs[databaseField].Placeholder = "postgres"
+	inputs[databaseField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+	inputs[databaseField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+	inputs[databaseField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
+	inputs[databaseField].CharLimit = 100
+	inputs[databaseField].Width = 50
+
+	// User input
+	inputs[userField] = textinput.New()
+	inputs[userField].Placeholder = "postgres"
+	inputs[userField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+	inputs[userField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+	inputs[userField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
+	inputs[userField].CharLimit = 100
+	inputs[userField].Width = 50
+
+	// Password input
+	inputs[passwordField] = textinput.New()
+	inputs[passwordField].Placeholder = "password"
+	inputs[passwordField].EchoMode = textinput.EchoPassword
+	inputs[passwordField].EchoCharacter = '•'
+	inputs[passwordField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+	inputs[passwordField].TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
+	inputs[passwordField].Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
+	inputs[passwordField].CharLimit = 100
+	inputs[passwordField].Width = 50
+
 	return &ConnectionDialog{
-		Port:        "5432",
-		ActiveField: 0,
+		inputs:      inputs,
+		focusIndex:  0,
+		cursorMode:  cursor.CursorBlink,
+		Theme:       th,
 	}
+}
+
+// Init initializes the connection dialog (required for tea.Model)
+func (c *ConnectionDialog) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+// Update handles messages for the connection dialog
+func (c *ConnectionDialog) Update(msg tea.Msg) (*ConnectionDialog, tea.Cmd) {
+	if !c.ManualMode {
+		return c, nil
+	}
+
+	// Update the focused text input
+	var cmd tea.Cmd
+	c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)
+	return c, cmd
 }
 
 // View renders the connection dialog
@@ -40,148 +120,162 @@ func (c *ConnectionDialog) View() string {
 		return ""
 	}
 
-	var content strings.Builder
-
+	var content string
 	if c.ManualMode {
-		content.WriteString(c.renderManualMode())
+		content = c.renderManualMode()
 	} else {
-		content.WriteString(c.renderDiscoveryMode())
+		content = c.renderDiscoveryMode()
 	}
 
-	style := c.Style.
-		Width(c.Width).
-		Height(c.Height).
+	// Create compact container that fits content
+	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62"))
+		BorderForeground(lipgloss.Color("#cba6f7")).
+		Padding(1, 2).
+		MaxWidth(70)
 
-	return style.Render(content.String())
+	return lipgloss.Place(
+		c.Width,
+		c.Height,
+		lipgloss.Center,
+		lipgloss.Center,
+		containerStyle.Render(content),
+	)
 }
 
 func (c *ConnectionDialog) renderDiscoveryMode() string {
-	var b strings.Builder
+	var sections []string
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
-	b.WriteString(titleStyle.Render("Connect to PostgreSQL"))
-	b.WriteString("\n\n")
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#cba6f7")).
+		MarginBottom(1)
+	sections = append(sections, titleStyle.Render("🔌 Connect to PostgreSQL"))
 
 	if len(c.DiscoveredInstances) == 0 {
-		b.WriteString("Discovering PostgreSQL instances...\n")
-		b.WriteString("\n")
-		b.WriteString("Press 'm' for manual connection\n")
-		return b.String()
-	}
+		// Loading state
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6adc8")).
+			Italic(true)
+		sections = append(sections, loadingStyle.Render("🔍 Discovering PostgreSQL instances..."))
+		sections = append(sections, "")
 
-	b.WriteString("Discovered instances:\n\n")
+		hintStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086"))
+		sections = append(sections, hintStyle.Render("Press 'm' for manual connection"))
+	} else {
+		// Instances list
+		listHeader := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6adc8")).
+			Bold(true).
+			Render("Discovered Instances:")
+		sections = append(sections, listHeader)
+		sections = append(sections, "")
 
-	for i, instance := range c.DiscoveredInstances {
-		prefix := "  "
-		if i == c.SelectedIndex {
-			prefix = "> "
+		for i, instance := range c.DiscoveredInstances {
+			itemStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#cdd6f4")).
+				PaddingLeft(2)
+
+			if i == c.SelectedIndex {
+				itemStyle = itemStyle.
+					Foreground(lipgloss.Color("#1e1e2e")).
+					Background(lipgloss.Color("#cba6f7")).
+					Bold(true).
+					PaddingLeft(1)
+			}
+
+			sourceStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6c7086")).
+				Italic(true)
+
+			line := fmt.Sprintf("%s:%d  %s",
+				instance.Host,
+				instance.Port,
+				sourceStyle.Render(fmt.Sprintf("(%s)", instance.Source.String())),
+			)
+			sections = append(sections, itemStyle.Render(line))
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s:%d (%s)\n",
-			prefix,
-			instance.Host,
-			instance.Port,
-			instance.Source.String(),
-		))
+		sections = append(sections, "")
+
+		// Instructions
+		helpStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086"))
+		sections = append(sections, helpStyle.Render("↑↓: Select  │  Enter: Connect  │  m: Manual  │  Esc: Cancel"))
 	}
 
-	b.WriteString("\n")
-	b.WriteString("↑/↓: Select | Enter: Connect | m: Manual | Esc: Cancel\n")
-
-	return b.String()
+	return strings.Join(sections, "\n")
 }
 
 func (c *ConnectionDialog) renderManualMode() string {
-	var b strings.Builder
+	var sections []string
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
-	b.WriteString(titleStyle.Render("Manual Connection"))
-	b.WriteString("\n\n")
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#cba6f7")).
+		MarginBottom(1)
+	sections = append(sections, titleStyle.Render("🔧 Manual Connection"))
 
-	fields := []struct {
-		label string
-		value string
-		index int
-	}{
-		{"Host:", c.Host, 0},
-		{"Port:", c.Port, 1},
-		{"Database:", c.Database, 2},
-		{"User:", c.User, 3},
-		{"Password:", strings.Repeat("*", len(c.Password)), 4},
-	}
+	// Form fields
+	fieldLabels := []string{"Host:", "Port:", "Database:", "User:", "Password:"}
 
-	for _, field := range fields {
-		prefix := "  "
-		if field.index == c.ActiveField {
-			prefix = "> "
+	for i, label := range fieldLabels {
+		labelStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6adc8")).
+			Width(10).
+			Align(lipgloss.Right)
+
+		// Add focus indicator
+		focusIndicator := "  "
+		if i == c.focusIndex {
+			focusIndicator = "▸ "
 		}
-		b.WriteString(fmt.Sprintf("%s%-10s %s\n", prefix, field.label, field.value))
+
+		fieldLine := fmt.Sprintf("%s%s %s",
+			focusIndicator,
+			labelStyle.Render(label),
+			c.inputs[i].View(),
+		)
+		sections = append(sections, fieldLine)
 	}
 
-	b.WriteString("\n")
-	b.WriteString("↑/↓: Navigate | Type to edit | Enter: Connect | Esc: Cancel\n")
+	sections = append(sections, "")
 
-	return b.String()
+	// Instructions
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6c7086"))
+	sections = append(sections, helpStyle.Render("Tab: Next Field  │  Enter: Connect  │  d: Discovery  │  Esc: Cancel"))
+
+	return strings.Join(sections, "\n")
 }
 
-// HandleInput processes text input for the active field in manual mode
-func (c *ConnectionDialog) HandleInput(char rune) {
-	if !c.ManualMode {
-		return
-	}
-
-	switch c.ActiveField {
-	case 0:
-		c.Host += string(char)
-	case 1:
-		c.Port += string(char)
-	case 2:
-		c.Database += string(char)
-	case 3:
-		c.User += string(char)
-	case 4:
-		c.Password += string(char)
-	}
+// NextInput focuses the next input field
+func (c *ConnectionDialog) NextInput() {
+	c.inputs[c.focusIndex].Blur()
+	c.focusIndex = (c.focusIndex + 1) % len(c.inputs)
+	c.inputs[c.focusIndex].Focus()
 }
 
-// HandleBackspace removes the last character from the active field
-func (c *ConnectionDialog) HandleBackspace() {
-	if !c.ManualMode {
-		return
+// PrevInput focuses the previous input field
+func (c *ConnectionDialog) PrevInput() {
+	c.inputs[c.focusIndex].Blur()
+	c.focusIndex--
+	if c.focusIndex < 0 {
+		c.focusIndex = len(c.inputs) - 1
 	}
-
-	var field *string
-	switch c.ActiveField {
-	case 0:
-		field = &c.Host
-	case 1:
-		field = &c.Port
-	case 2:
-		field = &c.Database
-	case 3:
-		field = &c.User
-	case 4:
-		field = &c.Password
-	default:
-		return
-	}
-
-	if len(*field) > 0 {
-		*field = (*field)[:len(*field)-1]
-	}
+	c.inputs[c.focusIndex].Focus()
 }
 
-// MoveSelection moves the selection up or down
+// MoveSelection moves the selection up or down in discovery mode
 func (c *ConnectionDialog) MoveSelection(delta int) {
 	if c.ManualMode {
-		c.ActiveField += delta
-		if c.ActiveField < 0 {
-			c.ActiveField = 4
-		}
-		if c.ActiveField > 4 {
-			c.ActiveField = 0
+		if delta > 0 {
+			c.NextInput()
+		} else {
+			c.PrevInput()
 		}
 	} else {
 		if len(c.DiscoveredInstances) == 0 {
@@ -198,6 +292,21 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 	}
 }
 
+// ToggleMode switches between discovery and manual mode
+func (c *ConnectionDialog) ToggleMode() {
+	c.ManualMode = !c.ManualMode
+	if c.ManualMode {
+		// Focus first input when entering manual mode
+		c.focusIndex = 0
+		c.inputs[c.focusIndex].Focus()
+	} else {
+		// Blur all inputs when leaving manual mode
+		for i := range c.inputs {
+			c.inputs[i].Blur()
+		}
+	}
+}
+
 // GetSelectedInstance returns the currently selected instance
 func (c *ConnectionDialog) GetSelectedInstance() *models.DiscoveredInstance {
 	if c.ManualMode || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.DiscoveredInstances) {
@@ -208,24 +317,42 @@ func (c *ConnectionDialog) GetSelectedInstance() *models.DiscoveredInstance {
 
 // GetManualConfig returns the manual connection config if valid, or error
 func (c *ConnectionDialog) GetManualConfig() (models.ConnectionConfig, error) {
-	if c.Host == "" {
+	host := strings.TrimSpace(c.inputs[hostField].Value())
+	port := strings.TrimSpace(c.inputs[portField].Value())
+	database := strings.TrimSpace(c.inputs[databaseField].Value())
+	user := strings.TrimSpace(c.inputs[userField].Value())
+	password := c.inputs[passwordField].Value()
+
+	if host == "" {
 		return models.ConnectionConfig{}, fmt.Errorf("host is required")
 	}
-	if c.User == "" {
+	if user == "" {
 		return models.ConnectionConfig{}, fmt.Errorf("user is required")
 	}
-	if c.Database == "" {
+	if database == "" {
 		return models.ConnectionConfig{}, fmt.Errorf("database is required")
 	}
 
+	if port == "" {
+		port = "5432"
+	}
+
 	return models.ConnectionConfig{
-		Host:     c.Host,
-		Port:     mustParseInt(c.Port, 5432),
-		Database: c.Database,
-		User:     c.User,
-		Password: c.Password,
+		Host:     host,
+		Port:     mustParseInt(port, 5432),
+		Database: database,
+		User:     user,
+		Password: password,
 		SSLMode:  "prefer",
 	}, nil
+}
+
+// SetDiscoveredInstances updates the list of discovered instances
+func (c *ConnectionDialog) SetDiscoveredInstances(instances []models.DiscoveredInstance) {
+	c.DiscoveredInstances = instances
+	if c.SelectedIndex >= len(instances) {
+		c.SelectedIndex = 0
+	}
 }
 
 func mustParseInt(s string, defaultVal int) int {
