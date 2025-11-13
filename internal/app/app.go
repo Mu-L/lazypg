@@ -694,7 +694,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "up", "k":
 					a.tableView.MoveSelection(-1)
 					return a, nil
-				case "down":
+				case "down", "j":
 					a.tableView.MoveSelection(1)
 
 					// Check if we need to load more data (lazy loading)
@@ -715,14 +715,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					return a, nil
+				case "left", "h":
+					a.tableView.MoveSelectionHorizontal(-1)
+					return a, nil
+				case "right", "l":
+					a.tableView.MoveSelectionHorizontal(1)
+					return a, nil
 				case "ctrl+u":
 					a.tableView.PageUp()
 					return a, nil
 				case "ctrl+d":
 					a.tableView.PageDown()
 					return a, nil
-				case "j":
-					// Open JSONB viewer if cell contains JSONB
+				case "J":
+					// Open JSONB viewer if cell contains JSONB (uppercase J to avoid conflict with vim down)
 					selectedRow, selectedCol := a.tableView.GetSelectedCell()
 					if selectedRow >= 0 && selectedCol >= 0 && selectedRow < len(a.tableView.Rows) && selectedCol < len(a.tableView.Columns) {
 						cellValue := a.tableView.Rows[selectedRow][selectedCol]
@@ -872,15 +878,15 @@ func (a *App) View() string {
 // renderNormalView renders the normal application view
 func (a *App) renderNormalView() string {
 
-	// Top bar with app name and connection status
+	// Top bar with modern Catppuccin styling
 	appNameStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(a.theme.BorderFocused).
-		Background(a.theme.Selection)
+		Foreground(lipgloss.Color("#cba6f7")). // Mauve
+		Background(lipgloss.Color("#313244"))   // Surface0
 
 	connStatus := ""
 	if a.state.ActiveConnection != nil {
-		// Build connection string
+		// Build connection string with elegant formatting
 		conn := a.state.ActiveConnection
 		connStr := fmt.Sprintf("%s@%s:%d/%s",
 			conn.Config.User,
@@ -888,86 +894,97 @@ func (a *App) renderNormalView() string {
 			conn.Config.Port,
 			conn.Config.Database)
 
-		connStatus = " " + lipgloss.NewStyle().
-			Foreground(a.theme.Success).
-			Render("●") + " " +
+		connStatus = "  " + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6e3a1")). // Green
+			Render("") + " " +
 			lipgloss.NewStyle().
-			Foreground(a.theme.Foreground).
+			Foreground(lipgloss.Color("#cdd6f4")). // Text
 			Render(connStr)
 	} else {
-		connStatus = " " + lipgloss.NewStyle().
-			Foreground(a.theme.Metadata).
-			Render("○ Not connected")
+		connStatus = "  " + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")). // Overlay0
+			Render("") + " " +
+			lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")).
+			Render("Not connected")
 	}
 
-	topBarLeft := appNameStyle.Render(" 󱘖 LazyPG ") + connStatus
+	topBarLeft := appNameStyle.Render("  LazyPG ") + connStatus
 	topBarRight := lipgloss.NewStyle().
-		Foreground(a.theme.Metadata).
-		Render("? help")
+		Foreground(lipgloss.Color("#89b4fa")). // Blue
+		Render("? ") +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")).
+			Render("help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	// Create top bar as a bordered box
+	// Create modern top bar with subtle border
 	topBarStyle := lipgloss.NewStyle().
-		Width(a.state.Width). // Full width - lipgloss will handle borders
-		Background(a.theme.Selection).
-		Foreground(a.theme.Foreground).
+		Width(a.state.Width).
+		Background(lipgloss.Color("#313244")). // Surface0
+		Foreground(lipgloss.Color("#cdd6f4")). // Text
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(a.theme.Border).
+		BorderForeground(lipgloss.Color("#45475a")). // Surface1
 		Padding(0, 1)
 
 	topBar := topBarStyle.Render(topBarContent)
 
-	// Context-sensitive bottom bar
+	// Context-sensitive bottom bar with modern styling
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#89b4fa")). // Blue for keys
+		Bold(true)
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6c7086")) // Overlay0 for descriptions
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#45475a")) // Surface1 for separators
+
 	var bottomBarLeft string
 	if a.state.FocusedPanel == models.LeftPanel {
-		// Tree navigation keys
-		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
-		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
-
+		// Tree navigation keys with icons
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
-			dimStyle.Render(" │ ") +
-			keyStyle.Render("→←") + dimStyle.Render(" expand/collapse") +
-			dimStyle.Render(" │ ") +
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("→←") + dimStyle.Render(" expand") +
+			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Enter") + dimStyle.Render(" select")
 	} else {
 		// Table navigation keys
-		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
-		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
-
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
-			dimStyle.Render(" │ ") +
-			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page")
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page") +
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("j") + dimStyle.Render(" jsonb")
 	}
 
 	// Add filter indicator if active
 	if a.activeFilter != nil && len(a.activeFilter.RootGroup.Conditions) > 0 {
-		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
-		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
 		filterCount := len(a.activeFilter.RootGroup.Conditions)
 		filterSuffix := ""
 		if filterCount > 1 {
 			filterSuffix = "s"
 		}
-		filterIndicator := keyStyle.Render("🔍") + dimStyle.Render(fmt.Sprintf(" %d filter%s active", filterCount, filterSuffix))
-		bottomBarLeft = bottomBarLeft + dimStyle.Render(" │ ") + filterIndicator
+		filterStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f9e2af")) // Yellow for filter
+		filterIndicator := separatorStyle.Render(" │ ") +
+			filterStyle.Render("") + dimStyle.Render(fmt.Sprintf(" %d filter%s", filterCount, filterSuffix))
+		bottomBarLeft = bottomBarLeft + filterIndicator
 	}
 
-	// Common keys on the right
-	keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
-	dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+	// Common keys on the right with icons
 	bottomBarRight := keyStyle.Render("Tab") + dimStyle.Render(" switch") +
-		dimStyle.Render(" │ ") +
+		separatorStyle.Render(" │ ") +
+		keyStyle.Render("c") + dimStyle.Render(" connect") +
+		separatorStyle.Render(" │ ") +
 		keyStyle.Render("q") + dimStyle.Render(" quit")
 
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	// Create bottom bar as a bordered box
+	// Create modern bottom bar
 	bottomBarStyle := lipgloss.NewStyle().
-		Width(a.state.Width). // Full width - lipgloss will handle borders
-		Background(a.theme.Selection).
-		Foreground(a.theme.Foreground).
+		Width(a.state.Width).
+		Background(lipgloss.Color("#313244")). // Surface0
+		Foreground(lipgloss.Color("#cdd6f4")). // Text
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(a.theme.Border).
+		BorderForeground(lipgloss.Color("#45475a")). // Surface1
 		Padding(0, 1)
 
 	bottomBar := bottomBarStyle.Render(bottomBarContent)
@@ -1100,14 +1117,26 @@ func (a *App) updatePanelDimensions() {
 	a.rightPanel.Height = contentHeight
 }
 
-// updatePanelStyles updates panel styling based on focus
+// updatePanelStyles updates panel styling based on focus with Catppuccin colors
 func (a *App) updatePanelStyles() {
 	if a.state.FocusedPanel == models.LeftPanel {
-		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.BorderFocused)
-		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.Border)
+		// Focused left panel - Blue border, transparent background like connection dialog
+		a.leftPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#89b4fa")). // Blue
+			Foreground(lipgloss.Color("#cdd6f4"))         // Text
+		// Unfocused right panel - Surface border
+		a.rightPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#45475a")). // Surface1
+			Foreground(lipgloss.Color("#cdd6f4"))        // Text
 	} else {
-		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.Border)
-		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.BorderFocused)
+		// Unfocused left panel
+		a.leftPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#45475a")). // Surface1
+			Foreground(lipgloss.Color("#cdd6f4"))        // Text
+		// Focused right panel - Blue border
+		a.rightPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#89b4fa")). // Blue
+			Foreground(lipgloss.Color("#cdd6f4"))        // Text
 	}
 }
 
@@ -1146,9 +1175,35 @@ func (a *App) formatStatusBar(left, right string) string {
 
 // handleConnectionDialog handles key events when connection dialog is visible
 func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle search mode
+	if a.connectionDialog.SearchMode {
+		switch msg.String() {
+		case "esc":
+			// Exit search mode and clear search
+			a.connectionDialog.ExitSearchMode(true)
+			return a, nil
+		case "enter":
+			// Exit search mode but keep search results
+			a.connectionDialog.ExitSearchMode(false)
+			return a, nil
+		default:
+			// Pass keys to search input
+			var cmd tea.Cmd
+			a.connectionDialog, cmd = a.connectionDialog.Update(msg)
+			return a, cmd
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
 		a.showConnectionDialog = false
+		return a, nil
+
+	case "/", "ctrl+f":
+		// Enter search mode (only in discovery mode)
+		if !a.connectionDialog.ManualMode {
+			a.connectionDialog.EnterSearchMode()
+		}
 		return a, nil
 
 	case "up", "k":

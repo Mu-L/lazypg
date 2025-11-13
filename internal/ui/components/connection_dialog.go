@@ -24,8 +24,8 @@ type ConnectionDialog struct {
 	InHistorySection    bool // true = selecting in history, false = selecting in discovered
 
 	// Search
+	SearchMode  bool // true = user is typing in search box
 	searchInput textinput.Model
-	searchQuery string
 
 	// Text input fields for manual mode
 	inputs      []textinput.Model
@@ -95,14 +95,14 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 	inputs[passwordField].CharLimit = 100
 	inputs[passwordField].Width = 40
 
-	// Create search input
+	// Create search input (width will be set dynamically in View)
 	searchInput := textinput.New()
 	searchInput.Placeholder = "Search for connection..."
 	searchInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#89b4fa"))
 	searchInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4"))
 	searchInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8"))
 	searchInput.CharLimit = 100
-	searchInput.Width = 60
+	searchInput.Width = 50 // Initial width, will be adjusted dynamically
 
 	return &ConnectionDialog{
 		inputs:           inputs,
@@ -121,14 +121,21 @@ func (c *ConnectionDialog) Init() tea.Cmd {
 
 // Update handles messages for the connection dialog
 func (c *ConnectionDialog) Update(msg tea.Msg) (*ConnectionDialog, tea.Cmd) {
-	if !c.ManualMode {
-		return c, nil
+	var cmd tea.Cmd
+
+	// Handle search mode
+	if c.SearchMode {
+		c.searchInput, cmd = c.searchInput.Update(msg)
+		return c, cmd
 	}
 
-	// Update the focused text input
-	var cmd tea.Cmd
-	c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)
-	return c, cmd
+	// Handle manual mode
+	if c.ManualMode {
+		c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)
+		return c, cmd
+	}
+
+	return c, nil
 }
 
 // View renders the connection dialog
@@ -137,19 +144,26 @@ func (c *ConnectionDialog) View() string {
 		return ""
 	}
 
-	var content string
-	if c.ManualMode {
-		content = c.renderManualMode()
-	} else {
-		content = c.renderDiscoveryMode()
-	}
-
-	// Create compact container - use MaxWidth instead of Width to avoid border overflow
+	// Define container style
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#cba6f7")).
-		Padding(1, 2).
-		MaxWidth(76) // MaxWidth constrains content, border adds 2 more chars (total ~78)
+		Padding(1, 2)
+
+	// Calculate max content width using GetHorizontalFrameSize (the correct way!)
+	maxWidth := 80 // Standard terminal width
+	if c.Width < maxWidth {
+		maxWidth = c.Width
+	}
+	contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
+
+	// Render content with calculated width
+	var content string
+	if c.ManualMode {
+		content = c.renderManualMode(contentWidth)
+	} else {
+		content = c.renderDiscoveryMode(contentWidth)
+	}
 
 	return lipgloss.Place(
 		c.Width,
@@ -160,7 +174,7 @@ func (c *ConnectionDialog) View() string {
 	)
 }
 
-func (c *ConnectionDialog) renderDiscoveryMode() string {
+func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 	var sections []string
 
 	// Title
@@ -170,12 +184,18 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 	sections = append(sections, titleStyle.Render("🔌 Open Connection"))
 	sections = append(sections, "")
 
-	// Search box
+	// Search box - calculate width using GetHorizontalFrameSize
 	searchBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#89b4fa")).
-		Padding(0, 1).
-		MaxWidth(66) // Safe width for 76-char container
+		Padding(0, 1)
+
+	// Set search input width based on available content width
+	searchInputWidth := contentWidth - searchBoxStyle.GetHorizontalFrameSize() - 4 // 4 for emoji + margins
+	if searchInputWidth > 0 && searchInputWidth != c.searchInput.Width {
+		c.searchInput.Width = searchInputWidth
+	}
+
 	sections = append(sections, searchBoxStyle.Render("🔍 "+c.searchInput.View()))
 	sections = append(sections, "")
 
@@ -185,16 +205,21 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 		Bold(true)
 	sections = append(sections, historyHeaderStyle.Render("Recent Connections"))
 
-	// History entries
-	if len(c.HistoryEntries) == 0 {
+	// History entries (filtered by search)
+	filteredHistory := c.GetFilteredHistory()
+	if len(filteredHistory) == 0 {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6c7086")).
 			Italic(true).
 			PaddingLeft(2)
-		sections = append(sections, emptyStyle.Render("No history yet"))
+		if c.searchInput.Value() != "" {
+			sections = append(sections, emptyStyle.Render("No matches"))
+		} else {
+			sections = append(sections, emptyStyle.Render("No history yet"))
+		}
 	} else {
 		historyCount := 0
-		for i, entry := range c.HistoryEntries {
+		for i, entry := range filteredHistory {
 			if historyCount >= 5 {
 				break // Limit to 5 history items
 			}
@@ -232,16 +257,23 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 		Bold(true)
 	sections = append(sections, discoveredHeaderStyle.Render("Discovered"))
 
-	// Discovered instances
-	if len(c.DiscoveredInstances) == 0 {
-		loadingStyle := lipgloss.NewStyle().
+	// Discovered instances (filtered by search)
+	filteredDiscovered := c.GetFilteredDiscovered()
+	if len(filteredDiscovered) == 0 {
+		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6c7086")).
 			Italic(true).
 			PaddingLeft(2)
-		sections = append(sections, loadingStyle.Render("Searching..."))
+		if c.searchInput.Value() != "" {
+			sections = append(sections, emptyStyle.Render("No matches"))
+		} else if len(c.DiscoveredInstances) == 0 {
+			sections = append(sections, emptyStyle.Render("Searching..."))
+		} else {
+			sections = append(sections, emptyStyle.Render("No matches"))
+		}
 	} else {
 		discoveredCount := 0
-		for i, instance := range c.DiscoveredInstances {
+		for i, instance := range filteredDiscovered {
 			if discoveredCount >= 3 {
 				break // Limit to 3 discovered items
 			}
@@ -276,12 +308,16 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 	// Instructions (keep under 68 chars)
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6c7086"))
-	sections = append(sections, helpStyle.Render("↑↓: Navigate │ Enter: Connect │ m: Manual │ Esc: Close"))
+	if c.SearchMode {
+		sections = append(sections, helpStyle.Render("Type to search │ Enter: Apply │ Esc: Clear & Exit"))
+	} else {
+		sections = append(sections, helpStyle.Render("↑↓: Navigate │ /: Search │ m: Manual │ Enter: Connect"))
+	}
 
 	return strings.Join(sections, "\n")
 }
 
-func (c *ConnectionDialog) renderManualMode() string {
+func (c *ConnectionDialog) renderManualMode(contentWidth int) string {
 	var sections []string
 
 	// Title
@@ -352,15 +388,15 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 		return
 	}
 
-	// Get the list size based on current section
+	// Get the list size based on current section (using filtered lists)
 	listSize := 0
 	if c.InHistorySection {
-		listSize = len(c.HistoryEntries)
+		listSize = len(c.GetFilteredHistory())
 		if listSize > 5 {
 			listSize = 5 // Limit to 5 displayed history items
 		}
 	} else {
-		listSize = len(c.DiscoveredInstances)
+		listSize = len(c.GetFilteredDiscovered())
 		if listSize > 3 {
 			listSize = 3 // Limit to 3 displayed discovered items
 		}
@@ -373,20 +409,31 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 
 	c.SelectedIndex += delta
 	if c.SelectedIndex < 0 {
-		// Move to discovered section if at top of history
+		// Moving up past the top
 		if c.InHistorySection {
-			c.InHistorySection = false
+			// At top of history, stay there
 			c.SelectedIndex = 0
 		} else {
-			c.SelectedIndex = 0
+			// At top of discovered, move back to history (bottom)
+			c.InHistorySection = true
+			historySize := len(c.HistoryEntries)
+			if historySize > 5 {
+				historySize = 5
+			}
+			if historySize > 0 {
+				c.SelectedIndex = historySize - 1
+			} else {
+				c.SelectedIndex = 0
+			}
 		}
 	} else if c.SelectedIndex >= listSize {
-		// Move to next section or wrap
+		// Moving down past the bottom
 		if c.InHistorySection {
-			// Move to discovered section
+			// At bottom of history, move to discovered (top)
 			c.InHistorySection = false
 			c.SelectedIndex = 0
 		} else {
+			// At bottom of discovered, stay there
 			c.SelectedIndex = listSize - 1
 		}
 	}
@@ -413,20 +460,84 @@ func (c *ConnectionDialog) ToggleMode() {
 	}
 }
 
+// EnterSearchMode enables search mode and focuses the search input
+func (c *ConnectionDialog) EnterSearchMode() {
+	c.SearchMode = true
+	c.searchInput.Focus()
+}
+
+// ExitSearchMode disables search mode and clears/keeps the search
+func (c *ConnectionDialog) ExitSearchMode(clearSearch bool) {
+	c.SearchMode = false
+	c.searchInput.Blur()
+	if clearSearch {
+		c.searchInput.SetValue("")
+	}
+	// Reset selection to first item
+	c.SelectedIndex = 0
+	c.InHistorySection = true
+}
+
+// GetFilteredHistory returns history entries matching the search query
+func (c *ConnectionDialog) GetFilteredHistory() []models.ConnectionHistoryEntry {
+	query := strings.ToLower(strings.TrimSpace(c.searchInput.Value()))
+	if query == "" {
+		return c.HistoryEntries
+	}
+
+	var filtered []models.ConnectionHistoryEntry
+	for _, entry := range c.HistoryEntries {
+		// Search in name, host, database, and user
+		if strings.Contains(strings.ToLower(entry.Name), query) ||
+			strings.Contains(strings.ToLower(entry.Host), query) ||
+			strings.Contains(strings.ToLower(entry.Database), query) ||
+			strings.Contains(strings.ToLower(entry.User), query) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+// GetFilteredDiscovered returns discovered instances matching the search query
+func (c *ConnectionDialog) GetFilteredDiscovered() []models.DiscoveredInstance {
+	query := strings.ToLower(strings.TrimSpace(c.searchInput.Value()))
+	if query == "" {
+		return c.DiscoveredInstances
+	}
+
+	var filtered []models.DiscoveredInstance
+	for _, instance := range c.DiscoveredInstances {
+		// Search in host and source
+		if strings.Contains(strings.ToLower(instance.Host), query) ||
+			strings.Contains(strings.ToLower(instance.Source.String()), query) {
+			filtered = append(filtered, instance)
+		}
+	}
+	return filtered
+}
+
 // GetSelectedInstance returns the currently selected instance
 func (c *ConnectionDialog) GetSelectedInstance() *models.DiscoveredInstance {
-	if c.ManualMode || c.InHistorySection || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.DiscoveredInstances) {
+	if c.ManualMode || c.InHistorySection {
 		return nil
 	}
-	return &c.DiscoveredInstances[c.SelectedIndex]
+	filtered := c.GetFilteredDiscovered()
+	if c.SelectedIndex < 0 || c.SelectedIndex >= len(filtered) {
+		return nil
+	}
+	return &filtered[c.SelectedIndex]
 }
 
 // GetSelectedHistory returns the currently selected history entry
 func (c *ConnectionDialog) GetSelectedHistory() *models.ConnectionHistoryEntry {
-	if c.ManualMode || !c.InHistorySection || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.HistoryEntries) {
+	if c.ManualMode || !c.InHistorySection {
 		return nil
 	}
-	return &c.HistoryEntries[c.SelectedIndex]
+	filtered := c.GetFilteredHistory()
+	if c.SelectedIndex < 0 || c.SelectedIndex >= len(filtered) {
+		return nil
+	}
+	return &filtered[c.SelectedIndex]
 }
 
 // GetManualConfig returns the manual connection config if valid, or error

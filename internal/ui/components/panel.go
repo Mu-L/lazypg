@@ -13,23 +13,14 @@ type Panel struct {
 	Style   lipgloss.Style
 }
 
-// View renders the panel with modern styling
+// View renders the panel with modern Catppuccin styling
 func (p *Panel) View() string {
 	if p.Width <= 0 || p.Height <= 0 {
 		return ""
 	}
 
-	// Modern double border style
-	borderStyle := lipgloss.Border{
-		Top:         "─",
-		Bottom:      "─",
-		Left:        "│",
-		Right:       "│",
-		TopLeft:     "╭",
-		TopRight:    "╮",
-		BottomLeft:  "╰",
-		BottomRight: "╯",
-	}
+	// Modern rounded border style
+	borderStyle := lipgloss.RoundedBorder()
 
 	// Calculate content area (subtract border + padding)
 	contentHeight := p.Height - 2 // -2 for top and bottom borders
@@ -40,14 +31,26 @@ func (p *Panel) View() string {
 		contentHeight = 1
 	}
 
-	// Create content with title
+	// Create content with modern title
 	var finalContent string
 	if p.Title != "" {
-		titleStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("39")). // Bright blue
-			Padding(0, 1)
-		finalContent = titleStyle.Render(p.Title) + "\n" + p.Content
+		// Get border color from style to determine if focused
+		borderColor := p.Style.GetBorderTopForeground()
+		var titleStyle lipgloss.Style
+
+		// Use blue for focused, lavender for unfocused
+		if borderColor == lipgloss.Color("#89b4fa") { // Blue = focused
+			titleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#89b4fa")). // Blue
+				Padding(0, 1)
+		} else {
+			titleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#b4befe")). // Lavender
+				Padding(0, 1)
+		}
+		finalContent = titleStyle.Render("  "+p.Title) + "\n" + p.Content
 	} else {
 		finalContent = p.Content
 	}

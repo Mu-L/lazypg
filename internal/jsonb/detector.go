@@ -35,40 +35,20 @@ func IsJSONB(value string) bool {
 	return err == nil
 }
 
-// Type returns the type of a JSONB value (object, array, string, number, boolean, null)
-func Type(value interface{}) string {
-	if value == nil {
-		return "null"
+// Truncate truncates a JSON string for table display
+func Truncate(jsonStr string, maxLen int) string {
+	if len(jsonStr) <= maxLen {
+		return jsonStr
 	}
 
-	var parsed interface{}
-	switch v := value.(type) {
-	case string:
-		if err := json.Unmarshal([]byte(v), &parsed); err != nil {
-			return "unknown"
-		}
-	case []byte:
-		if err := json.Unmarshal(v, &parsed); err != nil {
-			return "unknown"
-		}
-	default:
-		parsed = v
+	// Try to truncate at a reasonable boundary
+	truncated := jsonStr[:maxLen-3]
+
+	// Find last space, comma, or bracket
+	lastGood := strings.LastIndexAny(truncated, " ,{}[]")
+	if lastGood > maxLen/2 {
+		truncated = truncated[:lastGood]
 	}
 
-	switch parsed.(type) {
-	case map[string]interface{}:
-		return "object"
-	case []interface{}:
-		return "array"
-	case string:
-		return "string"
-	case float64:
-		return "number"
-	case bool:
-		return "boolean"
-	case nil:
-		return "null"
-	default:
-		return "unknown"
-	}
+	return truncated + "..."
 }

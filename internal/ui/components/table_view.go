@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/rebeliceyang/lazypg/internal/jsonb"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
@@ -53,34 +54,85 @@ func (tv *TableView) calculateColumnWidths() {
 		return
 	}
 
-	tv.ColumnWidths = make([]int, len(tv.Columns))
+	numColumns := len(tv.Columns)
+	tv.ColumnWidths = make([]int, numColumns)
+
+	// Calculate separator space: 3 chars (" │ ") * (numColumns - 1)
+	separatorWidth := 0
+	if numColumns > 1 {
+		separatorWidth = 3 * (numColumns - 1)
+	}
+
+	// Available width for actual column content
+	availableWidth := tv.Width - separatorWidth
+	if availableWidth < numColumns*10 {
+		// Minimum 10 chars per column
+		availableWidth = numColumns * 10
+	}
+
+	// Step 1: Calculate desired widths based on content
+	desiredWidths := make([]int, numColumns)
 
 	// Start with column header lengths
 	for i, col := range tv.Columns {
-		tv.ColumnWidths[i] = len(col)
+		desiredWidths[i] = runewidth.StringWidth(col)
 	}
 
 	// Check row data
 	for _, row := range tv.Rows {
 		for i, cell := range row {
-			if i < len(tv.ColumnWidths) {
-				cellLen := len(cell)
-				if cellLen > tv.ColumnWidths[i] {
-					tv.ColumnWidths[i] = cellLen
+			if i < numColumns {
+				cellLen := runewidth.StringWidth(cell)
+				if cellLen > desiredWidths[i] {
+					desiredWidths[i] = cellLen
 				}
 			}
 		}
 	}
 
-	// Apply max width constraint
+	// Step 2: Apply constraints and distribute available width
 	maxWidth := 50
-	for i := range tv.ColumnWidths {
-		if tv.ColumnWidths[i] > maxWidth {
-			tv.ColumnWidths[i] = maxWidth
+	minWidth := 10
+
+	// Calculate total desired width
+	totalDesired := 0
+	for _, w := range desiredWidths {
+		if w > maxWidth {
+			w = maxWidth
 		}
-		// Min width
-		if tv.ColumnWidths[i] < 10 {
-			tv.ColumnWidths[i] = 10
+		if w < minWidth {
+			w = minWidth
+		}
+		totalDesired += w
+	}
+
+	// Step 3: Distribute width proportionally if we exceed available width
+	if totalDesired > availableWidth {
+		// Scale down proportionally
+		scale := float64(availableWidth) / float64(totalDesired)
+		for i := range desiredWidths {
+			w := desiredWidths[i]
+			if w > maxWidth {
+				w = maxWidth
+			}
+			if w < minWidth {
+				w = minWidth
+			}
+			tv.ColumnWidths[i] = int(float64(w) * scale)
+			if tv.ColumnWidths[i] < minWidth {
+				tv.ColumnWidths[i] = minWidth
+			}
+		}
+	} else {
+		// Use desired widths with constraints
+		for i, w := range desiredWidths {
+			if w > maxWidth {
+				w = maxWidth
+			}
+			if w < minWidth {
+				w = minWidth
+			}
+			tv.ColumnWidths[i] = w
 		}
 	}
 }
@@ -129,62 +181,138 @@ func (tv *TableView) View() string {
 }
 
 func (tv *TableView) renderHeader() string {
-	var parts []string
+	s := make([]string, 0, len(tv.Columns)*2-1) // Account for separators
+
+	// Create separator style
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Border).
+		Background(tv.Theme.Selection)
+	separator := separatorStyle.Render(" │ ")
+
 	for i, col := range tv.Columns {
 		width := tv.ColumnWidths[i]
-		parts = append(parts, tv.pad(col, width))
+		if width <= 0 {
+			continue
+		}
+
+		// Use runewidth.Truncate for proper truncation
+		truncated := runewidth.Truncate(col, width, "…")
+
+		// Create cell width style
+		widthStyle := lipgloss.NewStyle().
+			Width(width).
+			MaxWidth(width).
+			Inline(true)
+
+		// Create header cell style
+		headerCellStyle := lipgloss.NewStyle().
+			Background(tv.Theme.Selection)
+
+		// Render cell with header background
+		renderedCell := headerCellStyle.Render(widthStyle.Render(truncated))
+		s = append(s, renderedCell)
+
+		// Add separator between columns (but not after the last column)
+		if i < len(tv.Columns)-1 {
+			s = append(s, separator)
+		}
 	}
-	// Modern header style using theme colors
+
+	// Join header cells horizontally with separators
+	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, s...)
+
+	// Apply bold and color to the entire row
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(tv.Theme.TableHeader).
-		Background(tv.Theme.Selection)
-	return headerStyle.Render(" " + strings.Join(parts, " │ ") + " ")
+		Foreground(tv.Theme.TableHeader)
+
+	return headerStyle.Render(headerRow)
 }
 
 func (tv *TableView) renderSeparator() string {
-	var parts []string
+	// Calculate total width of all columns
+	totalWidth := 0
 	for _, width := range tv.ColumnWidths {
-		parts = append(parts, strings.Repeat("─", width))
+		totalWidth += width
 	}
+
+	// Add width for separators: 3 chars (" │ ") * (number of separators)
+	// Number of separators = number of columns - 1
+	if len(tv.ColumnWidths) > 1 {
+		totalWidth += 3 * (len(tv.ColumnWidths) - 1)
+	}
+
+	// Create a simple horizontal line
 	separatorStyle := lipgloss.NewStyle().
 		Foreground(tv.Theme.Border)
-	return separatorStyle.Render("─" + strings.Join(parts, "─┼─") + "─")
+
+	return separatorStyle.Render(strings.Repeat("─", totalWidth))
 }
 
 func (tv *TableView) renderRow(row []string, selected bool) string {
-	var parts []string
-	for i, cell := range row {
+	s := make([]string, 0, len(row)*2-1) // Account for separators
+
+	// Create separator style (always uses border color, no background)
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Border)
+	separator := separatorStyle.Render(" │ ")
+
+	for i, value := range row {
 		if i >= len(tv.ColumnWidths) {
 			break
 		}
 		width := tv.ColumnWidths[i]
-
-		// Check if this looks like JSONB and format for display
-		cellValue := cell
-		if jsonb.IsJSONB(cellValue) {
-			cellValue = jsonb.Truncate(cellValue, 50)
-			// Add indicator that it's JSONB
-			cellValue = "📦 " + cellValue
+		if width <= 0 {
+			continue
 		}
 
-		parts = append(parts, tv.pad(cellValue, width))
+		// Check if this looks like JSONB and format for display
+		cellValue := value
+		if jsonb.IsJSONB(cellValue) {
+			cellValue = jsonb.Truncate(cellValue, 50)
+		}
+
+		// Use runewidth.Truncate for proper truncation (handles multibyte chars)
+		truncated := runewidth.Truncate(cellValue, width, "…")
+
+		// Create cell width style
+		widthStyle := lipgloss.NewStyle().
+			Width(width).
+			MaxWidth(width).
+			Inline(true)
+
+		// Determine cell background based on selection
+		var cellStyle lipgloss.Style
+		if selected && i == tv.SelectedCol {
+			// Selected cell - bright highlight
+			cellStyle = lipgloss.NewStyle().
+				Background(tv.Theme.BorderFocused).
+				Foreground(tv.Theme.Background).
+				Bold(true)
+		} else if selected {
+			// Selected row but not selected column - dim highlight
+			cellStyle = lipgloss.NewStyle().
+				Background(tv.Theme.Selection).
+				Foreground(tv.Theme.Foreground)
+		} else {
+			// Normal cell
+			cellStyle = lipgloss.NewStyle()
+		}
+
+		// Render cell: first apply width, then apply cell style
+		renderedCell := cellStyle.Render(widthStyle.Render(truncated))
+		s = append(s, renderedCell)
+
+		// Add separator between columns (but not after the last column)
+		if i < len(row)-1 && i < len(tv.ColumnWidths)-1 {
+			s = append(s, separator)
+		}
 	}
 
-	line := " " + strings.Join(parts, " │ ") + " "
+	// Join cells horizontally with separators
+	rowStr := lipgloss.JoinHorizontal(lipgloss.Top, s...)
 
-	if selected {
-		// Use theme's selection color
-		return lipgloss.NewStyle().
-			Background(tv.Theme.BorderFocused).
-			Foreground(tv.Theme.Background).
-			Bold(true).
-			Render(line)
-	}
-	// Use theme foreground for normal rows
-	return lipgloss.NewStyle().
-		Foreground(tv.Theme.Foreground).
-		Render(line)
+	return rowStr
 }
 
 func (tv *TableView) renderStatus() string {
@@ -254,4 +382,17 @@ func (tv *TableView) PageDown() {
 // GetSelectedCell returns the currently selected row and column indices
 func (tv *TableView) GetSelectedCell() (row int, col int) {
 	return tv.SelectedRow, tv.SelectedCol
+}
+
+// MoveSelectionHorizontal moves the selected column left or right
+func (tv *TableView) MoveSelectionHorizontal(delta int) {
+	tv.SelectedCol += delta
+
+	// Bounds checking
+	if tv.SelectedCol < 0 {
+		tv.SelectedCol = 0
+	}
+	if tv.SelectedCol >= len(tv.Columns) {
+		tv.SelectedCol = len(tv.Columns) - 1
+	}
 }

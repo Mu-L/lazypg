@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
@@ -54,7 +55,7 @@ func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table st
 			if val == nil {
 				rowData[j] = "NULL"
 			} else {
-				rowData[j] = fmt.Sprintf("%v", val)
+				rowData[j] = convertValueToString(val)
 			}
 		}
 		data[i] = rowData
@@ -65,4 +66,23 @@ func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table st
 		Rows:      data,
 		TotalRows: totalRows,
 	}, nil
+}
+
+// convertValueToString converts a database value to string, handling JSONB properly
+func convertValueToString(val interface{}) string {
+	// Check if it's a map or slice (JSONB types)
+	switch v := val.(type) {
+	case map[string]interface{}, []interface{}:
+		// Convert to JSON string
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(jsonBytes)
+	case []byte:
+		// Might be raw JSON bytes
+		return string(v)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }

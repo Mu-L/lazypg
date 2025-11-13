@@ -4,29 +4,59 @@ This document contains critical lessons learned and best practices for AI assist
 
 ## Critical: Bubble Tea / Lipgloss Width Calculation
 
-**⚠️ ALWAYS account for padding and borders when calculating content width!**
+**⚠️ ALWAYS USE `GetHorizontalFrameSize()` - DON'T CALCULATE MANUALLY!**
+
+**⚠️⚠️⚠️ THE CORRECT WAY: Use lipgloss built-in methods for frame size calculation!**
 
 ### The Problem
 
 When using `lipgloss` borders with `Width()` or `MaxWidth()`, the border and padding are rendered **outside** the content area, causing the total rendered width to exceed expectations and result in cut-off borders.
 
-### Width Calculation Formula
+**THE FUNDAMENTAL MISTAKE:** Setting MaxWidth without considering the actual terminal width. Even if content fits, borders can still overflow!
 
-```
-Total Rendered Width = Content Width + Padding (left + right) + Border (left + right)
-```
+### THE CORRECT METHOD: Use GetHorizontalFrameSize()
 
-### Concrete Example
-
+**✅ CORRECT APPROACH (Using lipgloss methods):**
 ```go
+// Define your style FIRST
 containerStyle := lipgloss.NewStyle().
-    Border(lipgloss.RoundedBorder()).  // +2 chars (1 left + 1 right)
-    Padding(1, 2).                     // +4 chars (2 left + 2 right)
-    MaxWidth(76)                       // Content max width
+    Border(lipgloss.RoundedBorder()).
+    BorderForeground(lipgloss.Color("#cba6f7")).
+    Padding(1, 2)
 
-// Total rendered width = 76 + 4 + 2 = 82 chars
-// This WILL overflow on an 80-char terminal!
+// Calculate content width using GetHorizontalFrameSize()
+maxWidth := 80 // Terminal width
+if windowWidth < maxWidth {
+    maxWidth = windowWidth
+}
+contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
+
+// Now render with calculated content width
+content := renderContent(contentWidth)
+return containerStyle.Render(content)
 ```
+
+**Why This Works:**
+- `GetHorizontalFrameSize()` returns the EXACT width used by borders, padding, and margins
+- No manual calculation needed - lipgloss knows its own sizes!
+- Adapts automatically if you change border or padding styles
+
+**❌ WRONG APPROACH (Manual Calculation):**
+```go
+// DON'T DO THIS - Prone to errors!
+containerStyle := lipgloss.NewStyle().
+    Border(lipgloss.RoundedBorder()).
+    Padding(1, 2).
+    MaxWidth(76)  // Manually calculated, easy to get wrong
+
+// Problems:
+// 1. Have to manually track border (2) + padding (4) + margin
+// 2. Easy to forget to update when style changes
+// 3. MaxWidth doesn't prevent overflow - still need to calculate!
+```
+
+**Key Insight:**
+Using `MaxWidth()` alone does NOT solve the problem! You still need to calculate the correct content width by subtracting frame sizes.
 
 ### Safe Content Width Calculation
 
@@ -92,6 +122,61 @@ containerStyle := lipgloss.NewStyle().
 sections = append(sections, "↑↓: Navigate │ Tab: Switch │ Enter: Connect │ m: Manual")
 // Result: Fits perfectly (76 + 4 + 2 = 82 → reduced to 72 effective width)
 ```
+
+### Nested Borders - Using GetHorizontalFrameSize() for Each Layer
+
+**✅ CORRECT WAY (Using GetHorizontalFrameSize for nested components):**
+```go
+// Outer container
+containerStyle := lipgloss.NewStyle().
+    Border(lipgloss.RoundedBorder()).
+    Padding(1, 2)
+
+maxWidth := 80 // Terminal width
+contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
+// contentWidth is now the available space for inner content
+
+// Inner search box (nested)
+searchBoxStyle := lipgloss.NewStyle().
+    Border(lipgloss.RoundedBorder()).
+    Padding(0, 1)
+
+// Calculate search input width from parent's content width
+searchInputWidth := contentWidth - searchBoxStyle.GetHorizontalFrameSize() - 4 // 4 for emoji + margins
+searchInput.Width = searchInputWidth
+
+// Render
+searchBox := searchBoxStyle.Render("🔍 " + searchInput.View())
+content := titleText + "\n" + searchBox + "\n" + moreContent
+return containerStyle.Render(content)
+```
+
+**Why This Works:**
+1. Each layer uses `GetHorizontalFrameSize()` to know its own frame width
+2. Parent calculates content width and passes it to children
+3. Children subtract their own frame size from parent's content width
+4. No manual calculations - all sizes come from lipgloss itself!
+
+**Real Example from This Project:**
+```go
+// In View() method:
+containerStyle := lipgloss.NewStyle().Border(...).Padding(1, 2)
+contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
+content := c.renderDiscoveryMode(contentWidth) // Pass width down
+return containerStyle.Render(content)
+
+// In renderDiscoveryMode(contentWidth int):
+searchBoxStyle := lipgloss.NewStyle().Border(...).Padding(0, 1)
+searchInputWidth := contentWidth - searchBoxStyle.GetHorizontalFrameSize() - 4
+c.searchInput.Width = searchInputWidth
+return searchBoxStyle.Render("🔍 " + c.searchInput.View())
+```
+
+**The Critical Lesson:**
+1. **Define styles WITHOUT MaxWidth** - let content determine size
+2. **Use GetHorizontalFrameSize()** for each styled component
+3. **Pass content width down** through render methods
+4. **Each child subtracts its frame size** from parent's content width
 
 ### Quick Reference Table
 

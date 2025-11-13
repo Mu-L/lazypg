@@ -1,270 +1,508 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rebeliceyang/lazypg/internal/jsonb"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
-// JSONBViewMode represents the display mode
-type JSONBViewMode int
+// NodeType represents the type of a JSON node
+type NodeType int
 
 const (
-	JSONBViewFormatted JSONBViewMode = iota
-	JSONBViewTree
-	JSONBViewQuery
+	NodeObject NodeType = iota
+	NodeArray
+	NodeString
+	NodeNumber
+	NodeBoolean
+	NodeNull
 )
+
+// TreeNode represents a node in the JSON tree
+type TreeNode struct {
+	Key        string      // Key name (for object properties)
+	Value      interface{} // Raw value
+	Type       NodeType    // Type of this node
+	IsExpanded bool        // Whether this node is expanded (for objects/arrays)
+	Children   []*TreeNode // Child nodes
+	Parent     *TreeNode   // Parent node
+	Path       []string    // Full path from root to this node
+	Level      int         // Indentation level (depth in tree)
+}
 
 // CloseJSONBViewerMsg is sent when viewer should close
 type CloseJSONBViewerMsg struct{}
 
-// JSONBViewer displays JSONB data in multiple modes
+// JSONBViewer displays JSONB data as an interactive collapsible tree
 type JSONBViewer struct {
 	Width  int
 	Height int
 	Theme  theme.Theme
 
-	// Data
-	value       interface{}
-	formatted   string
-	paths       []jsonb.Path
-	currentMode JSONBViewMode
+	// Tree structure
+	root *TreeNode
 
-	// Tree view state
-	selected     int
-	offset       int
-	expandedKeys map[string]bool
+	// Flattened list of visible nodes (for rendering and navigation)
+	visibleNodes []*TreeNode
+
+	// Navigation state
+	selectedIndex int // Index in visibleNodes
+	scrollOffset  int // Scroll offset for viewport
+
+	// Search state
+	searchMode   bool
+	searchQuery  string
+	searchResult []*TreeNode // Nodes matching search
 }
 
-// NewJSONBViewer creates a new JSONB viewer
+// NewJSONBViewer creates a new tree-based JSONB viewer
 func NewJSONBViewer(th theme.Theme) *JSONBViewer {
 	return &JSONBViewer{
-		Width:        80,
-		Height:       30,
-		Theme:        th,
-		currentMode:  JSONBViewFormatted,
-		expandedKeys: make(map[string]bool),
+		Width:         80,
+		Height:        30,
+		Theme:         th,
+		selectedIndex: 0,
+		scrollOffset:  0,
 	}
 }
 
-// SetValue sets the JSONB value to display
+// SetValue parses JSON and builds the tree structure
 func (jv *JSONBViewer) SetValue(value interface{}) error {
-	jv.value = value
-
-	// Format the value
-	formatted, err := jsonb.Format(value)
-	if err != nil {
-		return err
+	// Parse JSON if it's a string
+	var parsed interface{}
+	switch v := value.(type) {
+	case string:
+		if err := json.Unmarshal([]byte(v), &parsed); err != nil {
+			return fmt.Errorf("invalid JSON: %w", err)
+		}
+	case []byte:
+		if err := json.Unmarshal(v, &parsed); err != nil {
+			return fmt.Errorf("invalid JSON: %w", err)
+		}
+	default:
+		parsed = v
 	}
-	jv.formatted = formatted
 
-	// Extract paths
-	jv.paths = jsonb.ExtractPaths(value)
-	jv.selected = 0
-	jv.offset = 0
+	// Build tree
+	jv.root = jv.buildTree("root", parsed, nil, []string{}, 0)
+	jv.root.IsExpanded = true // Root is always expanded
+
+	// Flatten tree to get visible nodes
+	jv.rebuildVisibleNodes()
+
+	// Reset navigation
+	jv.selectedIndex = 0
+	jv.scrollOffset = 0
 
 	return nil
 }
 
+// buildTree recursively builds the tree structure from JSON
+func (jv *JSONBViewer) buildTree(key string, value interface{}, parent *TreeNode, path []string, level int) *TreeNode {
+	node := &TreeNode{
+		Key:        key,
+		Value:      value,
+		Parent:     parent,
+		Path:       path,
+		Level:      level,
+		IsExpanded: false, // Collapsed by default
+	}
+
+	// Determine type and build children
+	if value == nil {
+		node.Type = NodeNull
+		return node
+	}
+
+	switch v := value.(type) {
+	case map[string]interface{}:
+		node.Type = NodeObject
+		node.Children = make([]*TreeNode, 0, len(v))
+		for childKey, childValue := range v {
+			childPath := append([]string{}, path...)
+			childPath = append(childPath, childKey)
+			childNode := jv.buildTree(childKey, childValue, node, childPath, level+1)
+			node.Children = append(node.Children, childNode)
+		}
+
+	case []interface{}:
+		node.Type = NodeArray
+		node.Children = make([]*TreeNode, 0, len(v))
+		for i, childValue := range v {
+			childKey := fmt.Sprintf("[%d]", i)
+			childPath := append([]string{}, path...)
+			childPath = append(childPath, fmt.Sprintf("%d", i))
+			childNode := jv.buildTree(childKey, childValue, node, childPath, level+1)
+			node.Children = append(node.Children, childNode)
+		}
+
+	case string:
+		node.Type = NodeString
+
+	case float64:
+		node.Type = NodeNumber
+
+	case bool:
+		node.Type = NodeBoolean
+
+	default:
+		node.Type = NodeNull
+	}
+
+	return node
+}
+
+// rebuildVisibleNodes flattens the tree into a list of visible nodes (respecting collapse state)
+func (jv *JSONBViewer) rebuildVisibleNodes() {
+	jv.visibleNodes = []*TreeNode{}
+	if jv.root != nil {
+		jv.flattenTree(jv.root)
+	}
+}
+
+// flattenTree recursively flattens the tree into visibleNodes
+func (jv *JSONBViewer) flattenTree(node *TreeNode) {
+	jv.visibleNodes = append(jv.visibleNodes, node)
+
+	// Only recurse into children if node is expanded
+	if node.IsExpanded && len(node.Children) > 0 {
+		for _, child := range node.Children {
+			jv.flattenTree(child)
+		}
+	}
+}
+
 // Update handles keyboard input
 func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
+	// Handle search mode
+	if jv.searchMode {
+		switch msg.String() {
+		case "esc":
+			jv.searchMode = false
+			jv.searchQuery = ""
+			jv.searchResult = nil
+			return jv, nil
+		case "enter":
+			jv.searchMode = false
+			return jv, nil
+		case "backspace":
+			if len(jv.searchQuery) > 0 {
+				jv.searchQuery = jv.searchQuery[:len(jv.searchQuery)-1]
+				jv.performSearch()
+			}
+			return jv, nil
+		default:
+			// Append character to search query
+			if len(msg.String()) == 1 {
+				jv.searchQuery += msg.String()
+				jv.performSearch()
+			}
+			return jv, nil
+		}
+	}
+
+	// Normal navigation mode
 	switch msg.String() {
 	case "esc", "q":
 		return jv, func() tea.Msg {
 			return CloseJSONBViewerMsg{}
 		}
-	case "1":
-		jv.currentMode = JSONBViewFormatted
-	case "2":
-		jv.currentMode = JSONBViewTree
-	case "3":
-		jv.currentMode = JSONBViewQuery
+
 	case "up", "k":
-		if jv.currentMode == JSONBViewTree && jv.selected > 0 {
-			jv.selected--
-			if jv.selected < jv.offset {
-				jv.offset = jv.selected
-			}
+		if jv.selectedIndex > 0 {
+			jv.selectedIndex--
+			jv.adjustScroll()
 		}
+
 	case "down", "j":
-		if jv.currentMode == JSONBViewTree && jv.selected < len(jv.paths)-1 {
-			jv.selected++
-			visibleHeight := jv.Height - 8
-			if jv.selected >= jv.offset+visibleHeight {
-				jv.offset = jv.selected - visibleHeight + 1
+		if jv.selectedIndex < len(jv.visibleNodes)-1 {
+			jv.selectedIndex++
+			jv.adjustScroll()
+		}
+
+	case " ", "enter":
+		// Toggle expand/collapse
+		if jv.selectedIndex < len(jv.visibleNodes) {
+			node := jv.visibleNodes[jv.selectedIndex]
+			if node.Type == NodeObject || node.Type == NodeArray {
+				node.IsExpanded = !node.IsExpanded
+				jv.rebuildVisibleNodes()
 			}
 		}
+
+	case "E":
+		// Expand all
+		jv.expandAll(jv.root)
+		jv.rebuildVisibleNodes()
+
+	case "C":
+		// Collapse all
+		jv.collapseAll(jv.root)
+		jv.rebuildVisibleNodes()
+
+	case "/":
+		// Enter search mode
+		jv.searchMode = true
+		jv.searchQuery = ""
+		jv.searchResult = nil
 	}
 
 	return jv, nil
+}
+
+// adjustScroll adjusts scroll offset to keep selected node visible
+func (jv *JSONBViewer) adjustScroll() {
+	contentHeight := jv.Height - 5 // Account for header and footer
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	// Scroll up if selected is above viewport
+	if jv.selectedIndex < jv.scrollOffset {
+		jv.scrollOffset = jv.selectedIndex
+	}
+
+	// Scroll down if selected is below viewport
+	if jv.selectedIndex >= jv.scrollOffset+contentHeight {
+		jv.scrollOffset = jv.selectedIndex - contentHeight + 1
+	}
+}
+
+// expandAll recursively expands all nodes
+func (jv *JSONBViewer) expandAll(node *TreeNode) {
+	if node.Type == NodeObject || node.Type == NodeArray {
+		node.IsExpanded = true
+		for _, child := range node.Children {
+			jv.expandAll(child)
+		}
+	}
+}
+
+// collapseAll recursively collapses all nodes
+func (jv *JSONBViewer) collapseAll(node *TreeNode) {
+	if node.Type == NodeObject || node.Type == NodeArray {
+		node.IsExpanded = false
+		for _, child := range node.Children {
+			jv.collapseAll(child)
+		}
+	}
+}
+
+// performSearch searches for nodes matching the query
+func (jv *JSONBViewer) performSearch() {
+	jv.searchResult = []*TreeNode{}
+	if jv.searchQuery == "" {
+		return
+	}
+
+	query := strings.ToLower(jv.searchQuery)
+	for _, node := range jv.visibleNodes {
+		// Search in key name
+		if strings.Contains(strings.ToLower(node.Key), query) {
+			jv.searchResult = append(jv.searchResult, node)
+			continue
+		}
+
+		// Search in value (for primitives)
+		if node.Type == NodeString || node.Type == NodeNumber || node.Type == NodeBoolean {
+			valueStr := fmt.Sprintf("%v", node.Value)
+			if strings.Contains(strings.ToLower(valueStr), query) {
+				jv.searchResult = append(jv.searchResult, node)
+			}
+		}
+	}
 }
 
 // View renders the JSONB viewer
 func (jv *JSONBViewer) View() string {
 	var sections []string
 
-	// Title bar with mode indicators
+	// Title bar
 	titleStyle := lipgloss.NewStyle().
-		Foreground(jv.Theme.Foreground).
+		Foreground(jv.Theme.Background).
 		Background(jv.Theme.Info).
 		Padding(0, 1).
 		Bold(true)
 
-	modes := []string{"1:Formatted", "2:Tree", "3:Query"}
-	for i, mode := range modes {
-		if JSONBViewMode(i) == jv.currentMode {
-			modes[i] = "[" + mode + "]"
-		}
-	}
-	title := "JSONB Viewer    " + strings.Join(modes, "  ")
+	title := " JSONB Tree Viewer"
 	sections = append(sections, titleStyle.Render(title))
 
-	// Instructions
+	// Instructions or search bar
 	instrStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#a6adc8")).
+		Foreground(jv.Theme.Metadata).
 		Padding(0, 1)
-	sections = append(sections, instrStyle.Render("1-3: Switch mode  ↑↓: Navigate  Esc: Close"))
 
-	// Content based on mode
-	contentHeight := jv.Height - 6
-	var content string
-
-	switch jv.currentMode {
-	case JSONBViewFormatted:
-		content = jv.renderFormatted(contentHeight)
-	case JSONBViewTree:
-		content = jv.renderTree(contentHeight)
-	case JSONBViewQuery:
-		content = jv.renderQuery(contentHeight)
+	if jv.searchMode {
+		searchBar := fmt.Sprintf("Search: %s_", jv.searchQuery)
+		if len(jv.searchResult) > 0 {
+			searchBar += fmt.Sprintf("  (%d matches)", len(jv.searchResult))
+		}
+		sections = append(sections, instrStyle.Render(searchBar))
+	} else {
+		instr := "↑↓: Navigate  Space/Enter: Expand/Collapse  E: Expand All  C: Collapse All  /: Search  Esc: Close"
+		sections = append(sections, instrStyle.Render(instr))
 	}
 
+	// Content (tree view)
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	content := jv.renderTree(contentHeight)
 	sections = append(sections, content)
+
+	// Status bar
+	statusBar := jv.renderStatus()
+	sections = append(sections, statusBar)
 
 	// Container
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(jv.Theme.Border).
 		Width(jv.Width).
-		Height(jv.Height).
 		Padding(1)
 
-	return containerStyle.Render(strings.Join(sections, "\n"))
+	return lipgloss.Place(
+		jv.Width,
+		jv.Height,
+		lipgloss.Center,
+		lipgloss.Center,
+		containerStyle.Render(strings.Join(sections, "\n")),
+	)
 }
 
-func (jv *JSONBViewer) renderFormatted(height int) string {
-	lines := strings.Split(jv.formatted, "\n")
-
-	// Limit to visible height
-	if len(lines) > height {
-		lines = lines[:height]
-		lines = append(lines, "...")
+// renderTree renders the visible portion of the tree
+func (jv *JSONBViewer) renderTree(height int) string {
+	if len(jv.visibleNodes) == 0 {
+		return lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Italic(true).
+			Render("No data")
 	}
 
-	style := lipgloss.NewStyle().
-		Foreground(jv.Theme.Foreground).
-		Padding(0, 1)
-
-	return style.Render(strings.Join(lines, "\n"))
-}
-
-func (jv *JSONBViewer) renderTree(height int) string {
 	var lines []string
 
-	visibleStart := jv.offset
-	visibleEnd := jv.offset + height
-	if visibleEnd > len(jv.paths) {
-		visibleEnd = len(jv.paths)
+	endIndex := jv.scrollOffset + height
+	if endIndex > len(jv.visibleNodes) {
+		endIndex = len(jv.visibleNodes)
 	}
 
-	for i := visibleStart; i < visibleEnd; i++ {
-		path := jv.paths[i]
-		indent := strings.Repeat("  ", len(path.Parts))
-
-		// Get path label
-		label := "$"
-		if len(path.Parts) > 0 {
-			label = path.Parts[len(path.Parts)-1]
-		}
-
-		// Get value at path
-		value, err := jsonb.GetValueAtPath(jv.value, path)
-		valueStr := ""
-		if err == nil {
-			switch v := value.(type) {
-			case string:
-				valueStr = fmt.Sprintf(": \"%s\"", truncate(v, 30))
-			case float64:
-				valueStr = fmt.Sprintf(": %v", v)
-			case bool:
-				valueStr = fmt.Sprintf(": %v", v)
-			case nil:
-				valueStr = ": null"
-			case map[string]interface{}:
-				valueStr = fmt.Sprintf(" {%d keys}", len(v))
-			case []interface{}:
-				valueStr = fmt.Sprintf(" [%d items]", len(v))
-			}
-		}
-
-		line := indent + label + valueStr
-
-		// Highlight selected
-		style := lipgloss.NewStyle().Padding(0, 1)
-		if i == jv.selected {
-			style = style.Background(jv.Theme.Selection).Foreground(jv.Theme.Foreground)
-		}
-
-		lines = append(lines, style.Render(line))
+	for i := jv.scrollOffset; i < endIndex; i++ {
+		node := jv.visibleNodes[i]
+		line := jv.renderNode(node, i == jv.selectedIndex)
+		lines = append(lines, line)
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func (jv *JSONBViewer) renderQuery(height int) string {
-	if jv.selected >= len(jv.paths) {
-		return ""
+// renderNode renders a single tree node with proper indentation and styling
+func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool) string {
+	// Indentation
+	indent := strings.Repeat("  ", node.Level)
+
+	// Expand/collapse indicator
+	var indicator string
+	if node.Type == NodeObject || node.Type == NodeArray {
+		if node.IsExpanded {
+			indicator = "▼ "
+		} else {
+			indicator = "▶ "
+		}
+	} else {
+		indicator = "  "
 	}
 
-	selectedPath := jv.paths[jv.selected]
+	// Key with syntax highlighting
+	keyStyle := lipgloss.NewStyle().Foreground(jv.Theme.Info) // Blue for keys
+	keyPart := keyStyle.Render(node.Key)
 
-	var lines []string
-	lines = append(lines, "Selected Path:")
-	lines = append(lines, "  " + selectedPath.String())
-	lines = append(lines, "")
-	lines = append(lines, "PostgreSQL Queries:")
-	lines = append(lines, "")
+	// Value with syntax highlighting
+	var valuePart string
+	switch node.Type {
+	case NodeObject:
+		count := len(node.Children)
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Render(fmt.Sprintf(" { %d properties }", count))
 
-	// Assume column name is 'data'
-	colName := "data"
+	case NodeArray:
+		count := len(node.Children)
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Render(fmt.Sprintf(" [ %d items ]", count))
 
-	// #> operator (returns JSONB)
-	lines = append(lines, fmt.Sprintf("Get JSONB value:"))
-	lines = append(lines, fmt.Sprintf("  %s #> '%s'", colName, selectedPath.PostgreSQLPath()))
-	lines = append(lines, "")
+	case NodeString:
+		str := fmt.Sprintf("%v", node.Value)
+		if len(str) > 50 {
+			str = str[:47] + "..."
+		}
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Success). // Green for strings
+			Render(fmt.Sprintf(": \"%s\"", str))
 
-	// #>> operator (returns text)
-	lines = append(lines, fmt.Sprintf("Get text value:"))
-	lines = append(lines, fmt.Sprintf("  %s #>> '%s'", colName, selectedPath.PostgreSQLPath()))
-	lines = append(lines, "")
+	case NodeNumber:
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Warning). // Yellow/orange for numbers
+			Render(fmt.Sprintf(": %v", node.Value))
 
-	// @> operator (contains)
-	lines = append(lines, fmt.Sprintf("Filter rows containing this path:"))
-	lines = append(lines, fmt.Sprintf("  %s @> '{...}'", colName))
+	case NodeBoolean:
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Error). // Red for booleans
+			Render(fmt.Sprintf(": %v", node.Value))
 
-	style := lipgloss.NewStyle().
-		Foreground(jv.Theme.Foreground).
-		Padding(0, 1)
+	case NodeNull:
+		valuePart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Italic(true).
+			Render(": null")
+	}
 
-	return style.Render(strings.Join(lines, "\n"))
+	line := indent + indicator + keyPart + valuePart
+
+	// Highlight selected row
+	if isSelected {
+		return lipgloss.NewStyle().
+			Background(jv.Theme.Selection).
+			Foreground(jv.Theme.Background).
+			Bold(true).
+			Width(jv.Width - 6). // Account for container padding
+			Render(line)
+	}
+
+	return line
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+// renderStatus renders the status bar at the bottom
+func (jv *JSONBViewer) renderStatus() string {
+	totalNodes := len(jv.visibleNodes)
+	currentPos := jv.selectedIndex + 1
+
+	var pathStr string
+	if jv.selectedIndex < len(jv.visibleNodes) {
+		node := jv.visibleNodes[jv.selectedIndex]
+		if len(node.Path) > 0 {
+			pathStr = "Path: $." + strings.Join(node.Path, ".")
+		} else {
+			pathStr = "Path: $"
+		}
+
+		// Truncate if too long
+		maxPathLen := jv.Width - 30
+		if len(pathStr) > maxPathLen {
+			pathStr = pathStr[:maxPathLen-3] + "..."
+		}
 	}
-	return s[:maxLen-3] + "..."
+
+	status := fmt.Sprintf(" %d/%d  %s", currentPos, totalNodes, pathStr)
+
+	return lipgloss.NewStyle().
+		Foreground(jv.Theme.Metadata).
+		Italic(true).
+		Render(status)
 }
