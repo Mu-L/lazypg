@@ -1,5 +1,6 @@
 # Binaries
 /lazypg
+bin/
 *.exe
 *.dll
 *.so
