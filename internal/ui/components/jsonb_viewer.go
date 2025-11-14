@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
@@ -68,6 +69,9 @@ type JSONBViewer struct {
 
 	// Help mode
 	helpMode bool
+
+	// Status message (e.g., "Path copied!")
+	statusMessage string
 }
 
 // NewJSONBViewer creates a new tree-based JSONB viewer
@@ -190,6 +194,11 @@ func (jv *JSONBViewer) flattenTree(node *TreeNode) {
 
 // Update handles keyboard input
 func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
+	// Clear status message on any key press (except when copying)
+	if msg.String() != "y" && msg.String() != "Y" {
+		jv.statusMessage = ""
+	}
+
 	// Handle help mode
 	if jv.helpMode {
 		// Any key exits help mode
@@ -404,6 +413,10 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 	case "y":
 		// Copy JSON path to clipboard (yank)
 		jv.copyCurrentPath()
+
+	case "Y":
+		// Copy current node value to clipboard
+		jv.copyCurrentValue()
 
 	// === Phase 3: Advanced Features ===
 	case "m":
@@ -801,6 +814,11 @@ func (jv *JSONBViewer) renderStatus() string {
 
 	status := fmt.Sprintf(" %d/%d  %s", currentPos, totalNodes, pathStr)
 
+	// Add status message if present
+	if jv.statusMessage != "" {
+		status = fmt.Sprintf("%s  |  %s", status, jv.statusMessage)
+	}
+
 	return lipgloss.NewStyle().
 		Foreground(jv.Theme.Metadata).
 		Italic(true).
@@ -1006,9 +1024,10 @@ func (jv *JSONBViewer) jumpToPrevArrayItem() {
 	jv.jumpToPrevSibling()
 }
 
-// copyCurrentPath copies the JSON path of current node (placeholder - actual clipboard integration needed)
+// copyCurrentPath copies the JSON path of current node to clipboard
 func (jv *JSONBViewer) copyCurrentPath() {
 	if jv.selectedIndex >= len(jv.visibleNodes) {
+		jv.statusMessage = "⚠ No node selected"
 		return
 	}
 
@@ -1020,9 +1039,14 @@ func (jv *JSONBViewer) copyCurrentPath() {
 		pathStr = "$"
 	}
 
-	// TODO: Integrate with clipboard (e.g., using github.com/atotto/clipboard)
-	// For now, we'll store it in a field to show in status
-	fmt.Printf("Copied path: %s\n", pathStr)
+	// Copy to clipboard
+	err := clipboard.WriteAll(pathStr)
+	if err != nil {
+		jv.statusMessage = fmt.Sprintf("⚠ Failed to copy: %v", err)
+		return
+	}
+
+	jv.statusMessage = fmt.Sprintf("✓ Copied: %s", pathStr)
 }
 
 // ============================================================================
@@ -1154,6 +1178,7 @@ Search:
 
 Advanced:
   y            Copy JSON path (yank)
+  Y            Copy current node value
   m{a-z}       Set mark at current position
   '{a-z}       Jump to mark
   a-z          Quick jump to key starting with letter
@@ -1168,4 +1193,52 @@ Press any key to close help...
 	return lipgloss.NewStyle().
 		Foreground(jv.Theme.Foreground).
 		Render(helpText)
+}
+
+// copyCurrentValue copies the current node's value to clipboard
+func (jv *JSONBViewer) copyCurrentValue() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		jv.statusMessage = "⚠ No node selected"
+		return
+	}
+
+	node := jv.visibleNodes[jv.selectedIndex]
+	
+	// Marshal the value to JSON
+	var valueStr string
+	if node.Type == NodeObject || node.Type == NodeArray {
+		// For objects and arrays, marshal to pretty JSON
+		jsonBytes, err := json.MarshalIndent(node.Value, "", "  ")
+		if err != nil {
+			jv.statusMessage = fmt.Sprintf("⚠ Failed to marshal: %v", err)
+			return
+		}
+		valueStr = string(jsonBytes)
+	} else {
+		// For primitives, use simple string representation
+		switch node.Type {
+		case NodeString:
+			valueStr = fmt.Sprintf("%v", node.Value)
+		case NodeNumber, NodeBoolean:
+			valueStr = fmt.Sprintf("%v", node.Value)
+		case NodeNull:
+			valueStr = "null"
+		default:
+			valueStr = fmt.Sprintf("%v", node.Value)
+		}
+	}
+
+	// Copy to clipboard
+	err := clipboard.WriteAll(valueStr)
+	if err != nil {
+		jv.statusMessage = fmt.Sprintf("⚠ Failed to copy: %v", err)
+		return
+	}
+
+	// Show preview of copied content
+	preview := valueStr
+	if len(preview) > 50 {
+		preview = preview[:47] + "..."
+	}
+	jv.statusMessage = fmt.Sprintf("✓ Copied value: %s", preview)
 }
