@@ -702,6 +702,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return a, nil
+		case "y":
+			// Copy functionality in structure view (copy name)
+			if a.currentTab > 0 {
+				statusMsg := a.structureView.CopyCurrentName()
+				if statusMsg != "" {
+					// Show status message (log.Println is acceptable per plan)
+					log.Println(statusMsg)
+				}
+				return a, nil
+			}
+		case "Y":
+			// Copy functionality in structure view (copy definition)
+			if a.currentTab > 0 {
+				statusMsg := a.structureView.CopyCurrentDefinition()
+				if statusMsg != "" {
+					log.Println(statusMsg)
+				}
+				return a, nil
+			}
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {

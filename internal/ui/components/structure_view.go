@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
@@ -216,4 +217,61 @@ func (sv *StructureView) renderTabBar() string {
 		tabParts[2], separator,
 		tabParts[3],
 	)
+}
+
+// CopyCurrentName copies the name of the selected item
+func (sv *StructureView) CopyCurrentName() string {
+	var name string
+	switch sv.activeTab {
+	case 1:
+		if col := sv.columnsView.GetSelectedColumn(); col != nil {
+			name = col.Name
+		}
+	case 2:
+		if con := sv.constraintsView.GetSelectedConstraint(); con != nil {
+			name = con.Name
+		}
+	case 3:
+		if idx := sv.indexesView.GetSelectedIndex(); idx != nil {
+			name = idx.Name
+		}
+	}
+
+	if name != "" {
+		clipboard.WriteAll(name)
+		return fmt.Sprintf("✓ Copied: %s", name)
+	}
+	return ""
+}
+
+// CopyCurrentDefinition copies the full definition of the selected item
+func (sv *StructureView) CopyCurrentDefinition() string {
+	var definition string
+	switch sv.activeTab {
+	case 1:
+		if col := sv.columnsView.GetSelectedColumn(); col != nil {
+			definition = fmt.Sprintf("%s %s %s DEFAULT %s",
+				col.Name, col.DataType,
+				map[bool]string{true: "NULL", false: "NOT NULL"}[col.IsNullable],
+				col.DefaultValue)
+		}
+	case 2:
+		if con := sv.constraintsView.GetSelectedConstraint(); con != nil {
+			definition = con.Definition
+		}
+	case 3:
+		if idx := sv.indexesView.GetSelectedIndex(); idx != nil {
+			definition = idx.Definition
+		}
+	}
+
+	if definition != "" {
+		clipboard.WriteAll(definition)
+		preview := definition
+		if len(preview) > 50 {
+			preview = preview[:50] + "..."
+		}
+		return fmt.Sprintf("✓ Copied: %s", preview)
+	}
+	return ""
 }
