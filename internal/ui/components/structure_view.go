@@ -48,6 +48,11 @@ func NewStructureView(th theme.Theme) *StructureView {
 	}
 }
 
+// HasTableLoaded checks if structure data has been loaded for the given table
+func (sv *StructureView) HasTableLoaded(schema, table string) bool {
+	return sv.schema == schema && sv.table == table
+}
+
 // SetTable sets the current table and loads structure data
 func (sv *StructureView) SetTable(ctx context.Context, pool *connection.Pool, schema, table string) error {
 	sv.schema = schema

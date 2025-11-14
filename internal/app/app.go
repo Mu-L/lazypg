@@ -1146,17 +1146,17 @@ func (a *App) renderRightPanel(width, height int) string {
 		a.structureView.Height = height
 
 		// Load table structure if needed (when table changes)
-		// We need to load structure data when switching to a new table
 		conn, err := a.connectionManager.GetActive()
 		if err == nil && conn != nil && conn.Pool != nil {
 			parts := strings.Split(a.currentTable, ".")
 			if len(parts) == 2 {
 				// Only load if we haven't loaded this table yet
-				// The SetTable method will handle the state
-				ctx := context.Background()
-				err := a.structureView.SetTable(ctx, conn.Pool, parts[0], parts[1])
-				if err != nil {
-					log.Printf("Failed to load structure: %v", err)
+				if !a.structureView.HasTableLoaded(parts[0], parts[1]) {
+					ctx := context.Background()
+					err := a.structureView.SetTable(ctx, conn.Pool, parts[0], parts[1])
+					if err != nil {
+						log.Printf("Failed to load structure: %v", err)
+					}
 				}
 			}
 		}
