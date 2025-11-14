@@ -76,6 +76,11 @@ type App struct {
 	showJSONBViewer bool
 	jsonbViewer     *components.JSONBViewer
 
+	// Structure view
+	showStructureView bool
+	structureView     *components.StructureView
+	currentTab        int // 0=Data, 1=Columns, 2=Constraints, 3=Indexes
+
 	// Favorites
 	showFavorites    bool
 	favoritesManager *favorites.Manager
@@ -187,6 +192,9 @@ func New(cfg *config.Config) *App {
 	// Initialize JSONB viewer
 	jsonbViewer := components.NewJSONBViewer(th)
 
+	// Initialize structure view
+	structureView := components.NewStructureView(th)
+
 	// Initialize favorites dialog
 	favoritesDialog := components.NewFavoritesDialog(th)
 
@@ -209,6 +217,9 @@ func New(cfg *config.Config) *App {
 		activeFilter:      nil,
 		showJSONBViewer:   false,
 		jsonbViewer:       jsonbViewer,
+		showStructureView: false,
+		structureView:     structureView,
+		currentTab:        0,
 		showFavorites:     false,
 		favoritesManager:  favoritesManager,
 		favoritesDialog:   favoritesDialog,
@@ -559,6 +570,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		// Tab switching (Ctrl+1/2/3/4)
+		case "ctrl+1":
+			a.currentTab = 0
+			a.structureView.SwitchTab(0)
+			return a, nil
+
+		case "ctrl+2":
+			a.currentTab = 1
+			a.structureView.SwitchTab(1)
+			return a, nil
+
+		case "ctrl+3":
+			a.currentTab = 2
+			a.structureView.SwitchTab(2)
+			return a, nil
+
+		case "ctrl+4":
+			a.currentTab = 3
+			a.structureView.SwitchTab(3)
+			return a, nil
+
 		case "ctrl+p":
 			// Open quick query
 			a.showQuickQuery = true
@@ -690,6 +722,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Handle table navigation when right panel is focused
 			if a.state.FocusedPanel == models.RightPanel && a.state.ViewMode == models.NormalMode {
+				// If structure view is active and not on Data tab, route to structure view
+				if a.currentTab > 0 {
+					a.structureView.Update(msg)
+					return a, nil
+				}
+
 				switch msg.String() {
 				case "up", "k":
 					a.tableView.MoveSelection(-1)
@@ -999,15 +1037,15 @@ func (a *App) renderNormalView() string {
 	a.treeView.Height = treeContentHeight
 	a.leftPanel.Content = a.treeView.View()
 
-	// Update table view dimensions and render
+	// Update right panel content
 	// Calculate available content height: panel height - borders (2) - title line (1) - padding (0)
-	tableContentHeight := a.rightPanel.Height - 3 // -2 for top/bottom borders, -1 for title
-	if tableContentHeight < 1 {
-		tableContentHeight = 1
+	rightContentHeight := a.rightPanel.Height - 3 // -2 for top/bottom borders, -1 for title
+	if rightContentHeight < 1 {
+		rightContentHeight = 1
 	}
-	a.tableView.Width = a.rightPanel.Width - 2 // -2 for horizontal padding inside panel
-	a.tableView.Height = tableContentHeight
-	a.rightPanel.Content = a.tableView.View()
+	rightContentWidth := a.rightPanel.Width - 2 // -2 for horizontal padding inside panel
+
+	a.rightPanel.Content = a.renderRightPanel(rightContentWidth, rightContentHeight)
 
 	// Panels side by side
 	panels := lipgloss.JoinHorizontal(
@@ -1078,6 +1116,48 @@ func (a *App) renderNormalView() string {
 	}
 
 	return mainView
+}
+
+// renderRightPanel renders the right panel content based on current state
+func (a *App) renderRightPanel(width, height int) string {
+	// If table is selected, show structure view
+	if a.currentTable != "" {
+		// Update structure view dimensions
+		a.structureView.Width = width
+		a.structureView.Height = height
+
+		// Load table structure if needed (when table changes)
+		// We need to load structure data when switching to a new table
+		conn, err := a.connectionManager.GetActive()
+		if err == nil && conn != nil && conn.Pool != nil {
+			parts := strings.Split(a.currentTable, ".")
+			if len(parts) == 2 {
+				// Only load if we haven't loaded this table yet
+				// The SetTable method will handle the state
+				ctx := context.Background()
+				err := a.structureView.SetTable(ctx, conn.Pool, parts[0], parts[1])
+				if err != nil {
+					log.Printf("Failed to load structure: %v", err)
+				}
+			}
+		}
+
+		// If Data tab is active, show existing table view
+		if a.currentTab == 0 {
+			// Existing table view rendering
+			a.tableView.Width = width
+			a.tableView.Height = height
+			return a.tableView.View()
+		}
+
+		// Otherwise show structure view
+		return a.structureView.View()
+	}
+
+	// No table selected - show table view (will display empty state)
+	a.tableView.Width = width
+	a.tableView.Height = height
+	return a.tableView.View()
 }
 
 // updatePanelDimensions calculates panel sizes based on window size
