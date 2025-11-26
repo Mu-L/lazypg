@@ -68,9 +68,8 @@ func GetDataViewKeys() []KeyBinding {
 // GetStructureViewKeys returns structure view key bindings
 func GetStructureViewKeys() []KeyBinding {
 	return []KeyBinding{
-		{"Ctrl+1/2/3/4", "Switch tabs (Data/Columns/Constraints/Indexes)"},
+		{"1/2/3/4", "Switch tabs (Data/Columns/Constraints/Indexes)"},
 		{"↑↓ or j/k", "Navigate rows"},
-		{"←→ or h/l", "Switch tabs"},
 		{"y", "Copy name"},
 		{"Y", "Copy definition"},
 	}

@@ -158,8 +158,8 @@ func (sv *StructureView) View() string {
 	b.WriteString(sv.renderTabBar())
 	b.WriteString("\n")
 
-	// Calculate content height (subtract tab bar)
-	contentHeight := sv.Height - 1
+	// Calculate content height (subtract tab bar + newline)
+	contentHeight := sv.Height - 2
 
 	// Update view dimensions
 	sv.tableView.Width = sv.Width
@@ -191,43 +191,56 @@ func (sv *StructureView) View() string {
 func (sv *StructureView) renderTabBar() string {
 	tabs := []struct {
 		index int
+		key   string
 		label string
 	}{
-		{0, "Data"},
-		{1, "Columns"},
-		{2, "Constraints"},
-		{3, "Indexes"},
+		{0, "1", "Data"},
+		{1, "2", "Columns"},
+		{2, "3", "Constraints"},
+		{3, "4", "Indexes"},
 	}
 
-	tabParts := make([]string, len(tabs))
+	var parts []string
+
 	for i, tab := range tabs {
-		var style lipgloss.Style
 		if tab.index == sv.activeTab {
-			// Active tab
-			style = lipgloss.NewStyle().
+			// Active tab - with blue indicator and background
+			indicatorStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#89b4fa")). // Blue
+				Bold(true)
+
+			tabStyle := lipgloss.NewStyle().
 				Bold(true).
-				Foreground(sv.Theme.BorderFocused).
-				Background(sv.Theme.Selection).
-				Padding(0, 2)
+				Foreground(lipgloss.Color("#cdd6f4")). // Text
+				Background(lipgloss.Color("#313244")). // Surface0
+				Padding(0, 1)
+
+			tabContent := indicatorStyle.Render("▌") + tabStyle.Render(tab.label)
+			parts = append(parts, tabContent)
 		} else {
-			// Inactive tab
-			style = lipgloss.NewStyle().
-				Foreground(sv.Theme.Metadata).
-				Padding(0, 2)
+			// Inactive tab with key hint
+			keyStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#585b70")). // Surface2
+				Faint(true)
+
+			tabStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6c7086")). // Overlay0
+				Padding(0, 1)
+
+			tabContent := keyStyle.Render(tab.key) + tabStyle.Render(tab.label)
+			parts = append(parts, tabContent)
 		}
-		tabParts[i] = style.Render(tab.label)
+
+		// Add separator between tabs (except after last)
+		if i < len(tabs)-1 {
+			separator := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#45475a")). // Surface1
+				Render(" │ ")
+			parts = append(parts, separator)
+		}
 	}
 
-	separator := lipgloss.NewStyle().
-		Foreground(sv.Theme.Border).
-		Render(" │ ")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		tabParts[0], separator,
-		tabParts[1], separator,
-		tabParts[2], separator,
-		tabParts[3],
-	)
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 // CopyCurrentName copies the name of the selected item

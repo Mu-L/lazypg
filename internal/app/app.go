@@ -651,26 +651,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		// Tab switching (Ctrl+1/2/3/4)
-		case "ctrl+1":
-			a.currentTab = 0
-			a.structureView.SwitchTab(0)
-			return a, nil
+		// Tab switching (1/2/3/4 when right panel focused, or Ctrl+1/2/3/4 globally)
+		case "1", "ctrl+1":
+			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+1" {
+				a.currentTab = 0
+				a.structureView.SwitchTab(0)
+				return a, nil
+			}
 
-		case "ctrl+2":
-			a.currentTab = 1
-			a.structureView.SwitchTab(1)
-			return a, nil
+		case "2", "ctrl+2":
+			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+2" {
+				a.currentTab = 1
+				a.structureView.SwitchTab(1)
+				return a, nil
+			}
 
-		case "ctrl+3":
-			a.currentTab = 2
-			a.structureView.SwitchTab(2)
-			return a, nil
+		case "3", "ctrl+3":
+			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+3" {
+				a.currentTab = 2
+				a.structureView.SwitchTab(2)
+				return a, nil
+			}
 
-		case "ctrl+4":
-			a.currentTab = 3
-			a.structureView.SwitchTab(3)
-			return a, nil
+		case "4", "ctrl+4":
+			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+4" {
+				a.currentTab = 3
+				a.structureView.SwitchTab(3)
+				return a, nil
+			}
 
 		case "ctrl+p":
 			// Open quick query
