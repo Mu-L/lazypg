@@ -246,7 +246,7 @@ func New(cfg *config.Config) *App {
 			Style:   lipgloss.NewStyle().BorderForeground(th.BorderFocused),
 		},
 		rightPanel: components.Panel{
-			Title:   "Content",
+			Title:   "", // No title for right panel
 			Content: "Select a database object to view",
 			Style:   lipgloss.NewStyle().BorderForeground(th.Border),
 		},
@@ -1224,8 +1224,8 @@ func (a *App) renderNormalView() string {
 	a.leftPanel.Content = a.treeView.View()
 
 	// Update right panel content
-	// Calculate available content height: panel height - borders (2) - title line (1) - padding (0)
-	rightContentHeight := a.rightPanel.Height - 3 // -2 for top/bottom borders, -1 for title
+	// Calculate available content height: panel height - borders (2) - padding (0)
+	rightContentHeight := a.rightPanel.Height - 2 // -2 for top/bottom borders (no title)
 	if rightContentHeight < 1 {
 		rightContentHeight = 1
 	}
