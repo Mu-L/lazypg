@@ -44,6 +44,9 @@ type TableView struct {
 	SearchQuery  string
 	Matches      []MatchPos // List of match positions
 	CurrentMatch int        // Index in Matches
+
+	// Preview pane for truncated content
+	PreviewPane *PreviewPane
 }
 
 // MatchPos represents a search match position
@@ -62,6 +65,7 @@ func NewTableView(th theme.Theme) *TableView {
 		SortColumn:    -1,
 		SortDirection: "ASC",
 		NullsFirst:    false,
+		PreviewPane:   NewPreviewPane(th),
 	}
 }
 
