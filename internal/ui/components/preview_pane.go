@@ -121,3 +121,68 @@ func (p *PreviewPane) wrapText(text string, maxWidth int) []string {
 
 	return result
 }
+
+// Toggle toggles the preview pane visibility
+// When toggled off, sets ForceHidden to prevent auto-show
+// When toggled on, clears ForceHidden to allow auto-show
+func (p *PreviewPane) Toggle() {
+	if p.Visible {
+		p.Visible = false
+		p.ForceHidden = true
+	} else {
+		p.ForceHidden = false
+		// Only show if content is truncated
+		p.Visible = p.IsTruncated && p.Content != "" && p.Content != "NULL"
+	}
+}
+
+// Height returns the actual rendered height including borders
+// Returns 0 if not visible
+func (p *PreviewPane) Height() int {
+	if !p.Visible {
+		return 0
+	}
+
+	// Calculate content height
+	contentHeight := len(p.contentLines)
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	// Apply max height constraint
+	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
+	if maxContentHeight < 1 {
+		maxContentHeight = 1
+	}
+	if contentHeight > maxContentHeight {
+		contentHeight = maxContentHeight
+	}
+
+	// Add frame size for total height
+	return contentHeight + p.style.GetVerticalFrameSize()
+}
+
+// IsScrollable returns true if content exceeds visible area
+func (p *PreviewPane) IsScrollable() bool {
+	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
+	return len(p.contentLines) > maxContentHeight
+}
+
+// ScrollUp scrolls content up
+func (p *PreviewPane) ScrollUp() {
+	if p.scrollY > 0 {
+		p.scrollY--
+	}
+}
+
+// ScrollDown scrolls content down
+func (p *PreviewPane) ScrollDown() {
+	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
+	maxScroll := len(p.contentLines) - maxContentHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.scrollY < maxScroll {
+		p.scrollY++
+	}
+}
