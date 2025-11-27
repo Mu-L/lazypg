@@ -1275,8 +1275,11 @@ func (a *App) renderNormalView() string {
 		)
 	}
 
-	// Render JSONB viewer if visible
+	// Render JSONB viewer if visible (nearly full screen)
 	if a.showJSONBViewer {
+		// Set viewer size to nearly full screen (with small margin)
+		a.jsonbViewer.Width = a.state.Width - 4
+		a.jsonbViewer.Height = a.state.Height - 2
 		mainView = lipgloss.Place(
 			a.state.Width,
 			a.state.Height,
