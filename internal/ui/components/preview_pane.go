@@ -301,9 +301,17 @@ func (p *PreviewPane) View() string {
 	// Join content
 	content := strings.Join(contentParts, "\n")
 
-	// Apply container style with width constraint
+	// Apply container style with width and height constraints
+	// Calculate inner height (content area without borders)
+	innerHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
+	if innerHeight < 3 {
+		innerHeight = 3
+	}
+
 	containerStyle := p.style.Copy().
-		Width(p.Width - p.style.GetHorizontalFrameSize())
+		Width(p.Width - p.style.GetHorizontalFrameSize()).
+		Height(innerHeight).
+		MaxHeight(innerHeight)
 
 	return containerStyle.Render(content)
 }
