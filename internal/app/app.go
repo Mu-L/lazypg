@@ -967,6 +967,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Toggle preview pane
 					a.tableView.TogglePreviewPane()
 					return a, nil
+				case "y":
+					// Copy preview pane content (yank)
+					if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
+						if err := a.tableView.PreviewPane.CopyContent(); err == nil {
+							log.Println("Copied preview content to clipboard")
+						}
+					}
+					return a, nil
 				case "n":
 					// Next search match
 					if a.tableView.SearchActive {
@@ -1191,6 +1199,8 @@ func (a *App) renderNormalView() string {
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page") +
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("p") + dimStyle.Render(" preview") +
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("j") + dimStyle.Render(" jsonb")
 	}

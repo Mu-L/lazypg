@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/rebeliceyang/lazypg/internal/jsonb"
@@ -193,6 +194,16 @@ func (p *PreviewPane) ScrollDown() {
 	}
 }
 
+// GetContent returns the raw content for copying
+func (p *PreviewPane) GetContent() string {
+	return p.Content
+}
+
+// CopyContent copies the preview content to clipboard
+func (p *PreviewPane) CopyContent() error {
+	return clipboard.WriteAll(p.Content)
+}
+
 // View renders the preview pane
 func (p *PreviewPane) View() string {
 	if !p.Visible {
@@ -247,7 +258,7 @@ func (p *PreviewPane) View() string {
 	if p.IsScrollable() {
 		helpParts = append(helpParts, "↑↓: Scroll")
 	}
-	helpParts = append(helpParts, "p: Toggle")
+	helpParts = append(helpParts, "y: Copy", "p: Toggle")
 
 	// Add JSONB hint if content is JSON
 	if jsonb.IsJSONB(p.Content) {
