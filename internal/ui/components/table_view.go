@@ -458,6 +458,9 @@ func (tv *TableView) MoveSelection(delta int) {
 	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
 		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
 	}
+
+	// Update preview pane
+	tv.UpdatePreviewPane()
 }
 
 // PageUp/PageDown
@@ -519,6 +522,9 @@ func (tv *TableView) MoveSelectionHorizontal(delta int) {
 	if tv.LeftColOffset > maxOffset {
 		tv.LeftColOffset = maxOffset
 	}
+
+	// Update preview pane
+	tv.UpdatePreviewPane()
 }
 
 // JumpScrollHorizontal scrolls horizontally by half the visible columns
@@ -765,4 +771,40 @@ func (tv *TableView) GetSelectedColumnName() string {
 		return ""
 	}
 	return tv.Columns[tv.SelectedCol]
+}
+
+// UpdatePreviewPane updates the preview pane with current selection
+func (tv *TableView) UpdatePreviewPane() {
+	if tv.PreviewPane == nil {
+		return
+	}
+
+	content := tv.GetSelectedCellContent()
+	title := tv.GetSelectedColumnName()
+	isTruncated := tv.IsCellTruncated()
+
+	tv.PreviewPane.SetContent(content, title, isTruncated)
+}
+
+// SetPreviewPaneDimensions sets the dimensions for the preview pane
+func (tv *TableView) SetPreviewPaneDimensions(width, maxHeight int) {
+	if tv.PreviewPane != nil {
+		tv.PreviewPane.Width = width
+		tv.PreviewPane.MaxHeight = maxHeight
+	}
+}
+
+// TogglePreviewPane toggles the preview pane visibility
+func (tv *TableView) TogglePreviewPane() {
+	if tv.PreviewPane != nil {
+		tv.PreviewPane.Toggle()
+	}
+}
+
+// GetPreviewPaneHeight returns the current preview pane height
+func (tv *TableView) GetPreviewPaneHeight() int {
+	if tv.PreviewPane != nil {
+		return tv.PreviewPane.Height()
+	}
+	return 0
 }
