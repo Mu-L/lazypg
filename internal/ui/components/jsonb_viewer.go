@@ -384,6 +384,8 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 	case "P":
 		// Toggle preview pane
 		if jv.previewPane != nil {
+			// Update content before toggling (so it has latest selection)
+			jv.updatePreviewPane()
 			jv.previewPane.Toggle()
 		}
 
@@ -476,8 +478,10 @@ func (jv *JSONBViewer) adjustScroll() {
 		jv.scrollOffset = jv.selectedIndex - contentHeight + 1
 	}
 
-	// Update preview pane
-	jv.updatePreviewPane()
+	// Update preview pane only if visible
+	if jv.previewPane != nil && jv.previewPane.Visible {
+		jv.updatePreviewPane()
+	}
 }
 
 // expandAll recursively expands all nodes

@@ -1379,16 +1379,15 @@ func (a *App) renderNormalView() string {
 func (a *App) renderRightPanel(width, height int) string {
 	// If table is selected, show structure view with tabs
 	if a.currentTable != "" {
-		// Calculate preview pane height
+		// Calculate preview pane height (only if visible)
 		previewHeight := 0
-		if a.currentTab == 0 && a.tableView.PreviewPane != nil {
+		if a.currentTab == 0 && a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
 			// Set preview pane dimensions (max 1/3 of available height)
 			maxPreviewHeight := height / 3
 			if maxPreviewHeight < 5 {
 				maxPreviewHeight = 5
 			}
 			a.tableView.SetPreviewPaneDimensions(width, maxPreviewHeight)
-			a.tableView.UpdatePreviewPane()
 			previewHeight = a.tableView.GetPreviewPaneHeight()
 		}
 

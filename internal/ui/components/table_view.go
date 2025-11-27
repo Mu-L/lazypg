@@ -459,8 +459,10 @@ func (tv *TableView) MoveSelection(delta int) {
 		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
 	}
 
-	// Update preview pane
-	tv.UpdatePreviewPane()
+	// Update preview pane only if visible
+	if tv.PreviewPane != nil && tv.PreviewPane.Visible {
+		tv.UpdatePreviewPane()
+	}
 }
 
 // PageUp/PageDown
@@ -797,6 +799,8 @@ func (tv *TableView) SetPreviewPaneDimensions(width, maxHeight int) {
 // TogglePreviewPane toggles the preview pane visibility
 func (tv *TableView) TogglePreviewPane() {
 	if tv.PreviewPane != nil {
+		// Update content before toggling (so it has latest selection)
+		tv.UpdatePreviewPane()
 		tv.PreviewPane.Toggle()
 	}
 }

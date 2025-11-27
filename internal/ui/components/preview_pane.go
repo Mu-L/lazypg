@@ -35,9 +35,10 @@ type PreviewPane struct {
 // NewPreviewPane creates a new preview pane
 func NewPreviewPane(th theme.Theme) *PreviewPane {
 	return &PreviewPane{
-		Width:     80,
-		MaxHeight: 10,
-		Theme:     th,
+		Width:       80,
+		MaxHeight:   10,
+		Theme:       th,
+		ForceHidden: true, // Default to hidden, user must press 'p' to show
 		style: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(th.Border).
@@ -49,28 +50,15 @@ func NewPreviewPane(th theme.Theme) *PreviewPane {
 // isTruncated indicates whether the content was truncated in the parent view
 func (p *PreviewPane) SetContent(content, title string, isTruncated bool) {
 	// Skip if content hasn't changed (performance optimization)
-	contentChanged := p.Content != content
+	if p.Content == content && p.Title == title {
+		return
+	}
 
+	p.Content = content
 	p.Title = title
 	p.IsTruncated = isTruncated
-
-	// Update visibility (only auto-show if not force hidden)
-	wasVisible := p.Visible
-	if !p.ForceHidden {
-		p.Visible = isTruncated && content != "" && content != "NULL"
-	}
-
-	// Only update content and reformat if content actually changed
-	if contentChanged {
-		p.Content = content
-		p.scrollY = 0
-		p.contentLines = nil // Clear cached lines, will be formatted on demand
-	}
-
-	// If becoming visible and we have no formatted lines, format now
-	if p.Visible && !wasVisible && p.contentLines == nil && content != "" {
-		p.formatContent()
-	}
+	p.scrollY = 0
+	p.contentLines = nil // Clear cached lines, will be formatted on demand
 }
 
 // formatContent formats the raw content for display
@@ -135,19 +123,17 @@ func (p *PreviewPane) wrapText(text string, maxWidth int) []string {
 }
 
 // Toggle toggles the preview pane visibility
-// When toggled off, sets ForceHidden to prevent auto-show
-// When toggled on, clears ForceHidden to allow auto-show
 func (p *PreviewPane) Toggle() {
 	if p.Visible {
 		p.Visible = false
 		p.ForceHidden = true
 		p.contentLines = nil // Clear formatted content for performance
 	} else {
-		p.ForceHidden = false
-		// Only show if content is truncated
-		p.Visible = p.IsTruncated && p.Content != "" && p.Content != "NULL"
-		if p.Visible {
-			p.formatContent() // Format content when becoming visible
+		// Show if we have content
+		if p.Content != "" && p.Content != "NULL" {
+			p.Visible = true
+			p.ForceHidden = false
+			p.formatContent()
 		}
 	}
 }
