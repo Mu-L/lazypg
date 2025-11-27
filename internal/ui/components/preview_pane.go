@@ -53,12 +53,16 @@ func (p *PreviewPane) SetContent(content, title string, isTruncated bool) {
 	p.IsTruncated = isTruncated
 	p.scrollY = 0
 
-	// Format content
-	p.formatContent()
-
 	// Update visibility (only auto-show if not force hidden)
 	if !p.ForceHidden {
 		p.Visible = isTruncated && content != "" && content != "NULL"
+	}
+
+	// Only format content if visible (performance optimization)
+	if p.Visible {
+		p.formatContent()
+	} else {
+		p.contentLines = nil
 	}
 }
 
@@ -130,10 +134,14 @@ func (p *PreviewPane) Toggle() {
 	if p.Visible {
 		p.Visible = false
 		p.ForceHidden = true
+		p.contentLines = nil // Clear formatted content for performance
 	} else {
 		p.ForceHidden = false
 		// Only show if content is truncated
 		p.Visible = p.IsTruncated && p.Content != "" && p.Content != "NULL"
+		if p.Visible {
+			p.formatContent() // Format content when becoming visible
+		}
 	}
 }
 

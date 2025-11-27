@@ -1296,15 +1296,14 @@ func (jv *JSONBViewer) updatePreviewPane() {
 
 	switch node.Type {
 	case NodeString:
+		// Only show preview for long strings (they can't be expanded)
 		str := fmt.Sprintf("%v", node.Value)
 		content = str
 		isTruncated = len(str) > 50
 	case NodeObject, NodeArray:
-		// Format as JSON
-		if jsonBytes, err := json.MarshalIndent(node.Value, "", "  "); err == nil {
-			content = string(jsonBytes)
-			isTruncated = true // Always show for objects/arrays
-		}
+		// Don't show preview for objects/arrays - user can expand them directly
+		content = ""
+		isTruncated = false
 	case NodeNumber, NodeBoolean:
 		content = fmt.Sprintf("%v", node.Value)
 		isTruncated = false
