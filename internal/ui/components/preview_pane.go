@@ -198,8 +198,11 @@ func (p *PreviewPane) View() string {
 		p.formatContent()
 	}
 
-	// Calculate dimensions
+	// Calculate dimensions - contentWidth is the space inside borders/padding
 	contentWidth := p.Width - p.style.GetHorizontalFrameSize()
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
 	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
 	if maxContentHeight < 1 {
 		maxContentHeight = 1
@@ -210,15 +213,15 @@ func (p *PreviewPane) View() string {
 		Foreground(p.Theme.Info).
 		Bold(true)
 
-	header := titleStyle.Render("Preview")
+	headerText := "Preview"
 	if p.Title != "" {
-		header = titleStyle.Render("Preview: " + p.Title)
+		headerText = "Preview: " + p.Title
 	}
-
 	// Truncate header if too long
-	if runewidth.StringWidth(header) > contentWidth-4 {
-		header = runewidth.Truncate(header, contentWidth-4, "...")
+	if runewidth.StringWidth(headerText) > contentWidth {
+		headerText = runewidth.Truncate(headerText, contentWidth-3, "...")
 	}
+	header := titleStyle.Render(headerText)
 
 	// Get visible content lines
 	startLine := p.scrollY
@@ -227,59 +230,75 @@ func (p *PreviewPane) View() string {
 		endLine = len(p.contentLines)
 	}
 
-	var contentParts []string
-	contentParts = append(contentParts, header)
+	// Helper to pad line to exact width
+	padLine := func(line string, width int) string {
+		lineWidth := runewidth.StringWidth(line)
+		if lineWidth >= width {
+			return line
+		}
+		return line + strings.Repeat(" ", width-lineWidth)
+	}
 
-	// Add content lines
+	var contentParts []string
+
+	// Add header (left-aligned, padded to width)
+	contentParts = append(contentParts, padLine(header, contentWidth))
+
+	// Add content lines (left-aligned, padded to width)
 	contentStyle := lipgloss.NewStyle().Foreground(p.Theme.Foreground)
 	for i := startLine; i < endLine; i++ {
 		line := p.contentLines[i]
 		// Truncate line if too long
 		if runewidth.StringWidth(line) > contentWidth {
-			line = runewidth.Truncate(line, contentWidth, "...")
+			line = runewidth.Truncate(line, contentWidth-3, "...")
 		}
-		contentParts = append(contentParts, contentStyle.Render(line))
+		// Pad to full width and apply style
+		paddedLine := padLine(line, contentWidth)
+		contentParts = append(contentParts, contentStyle.Render(paddedLine))
 	}
 
-	// Build help text
+	// Build help text - use abbreviated form for narrow panes
 	helpParts := []string{}
 	if p.IsScrollable() {
-		helpParts = append(helpParts, "↑↓: Scroll")
+		helpParts = append(helpParts, "↑↓")
 	}
-	helpParts = append(helpParts, "y: Copy", "p: Toggle")
+	helpParts = append(helpParts, "y:copy", "p:close")
 
 	// Add JSONB hint if content is JSON
 	if jsonb.IsJSONB(p.Content) {
-		helpParts = append(helpParts, "J: Tree")
+		helpParts = append(helpParts, "J:tree")
 	}
 
-	helpText := strings.Join(helpParts, " │ ")
+	helpText := strings.Join(helpParts, " ")
+
+	// Truncate help text if too long
+	if runewidth.StringWidth(helpText) > contentWidth {
+		helpText = runewidth.Truncate(helpText, contentWidth, "")
+	}
+
+	// Build footer with right-aligned help (manually pad on left)
+	helpWidth := runewidth.StringWidth(helpText)
+	leftPad := contentWidth - helpWidth
+	if leftPad < 0 {
+		leftPad = 0
+	}
 	helpStyle := lipgloss.NewStyle().
 		Foreground(p.Theme.Metadata).
 		Italic(true)
-
-	// Build footer with right-aligned help
-	footerPadding := contentWidth - runewidth.StringWidth(helpText)
-	if footerPadding < 0 {
-		footerPadding = 0
-	}
-	footer := strings.Repeat(" ", footerPadding) + helpStyle.Render(helpText)
+	footer := strings.Repeat(" ", leftPad) + helpStyle.Render(helpText)
 	contentParts = append(contentParts, footer)
 
 	// Join content
 	content := strings.Join(contentParts, "\n")
 
-	// Apply container style with width and height constraints
-	// Calculate inner height (content area without borders)
+	// Apply container style - don't set Width, let content determine size
 	innerHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
 	if innerHeight < 3 {
 		innerHeight = 3
 	}
 
 	containerStyle := p.style.Copy().
-		Width(p.Width - p.style.GetHorizontalFrameSize()).
-		Height(innerHeight).
-		MaxHeight(innerHeight)
+		Height(innerHeight)
 
 	return containerStyle.Render(content)
 }

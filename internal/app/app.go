@@ -1305,26 +1305,24 @@ func (a *App) renderNormalView() string {
 	if a.showJSONBViewer {
 		jsonbView := a.jsonbViewer.View()
 
-		// Check if preview panel should be shown alongside
+		// Check if preview panel should be shown below
 		if a.jsonbViewer.PreviewVisible() {
-			// Calculate preview panel width (use available space on right)
-			// JSONB viewer width + gap + preview width should fit in screen
-			gap := 2
-			previewWidth := (a.state.Width - a.jsonbViewer.Width - gap) / 2
-			if previewWidth < 30 {
-				previewWidth = 30
+			// Preview panel below JSONB viewer
+			// Use same width as JSONB viewer, height is 1/4 of screen
+			previewHeight := a.state.Height / 4
+			if previewHeight < 6 {
+				previewHeight = 6
 			}
-			if previewWidth > 50 {
-				previewWidth = 50
+			if previewHeight > 12 {
+				previewHeight = 12
 			}
 
-			previewPanel := a.jsonbViewer.RenderPreviewPanel(previewWidth, a.jsonbViewer.Height)
+			previewPanel := a.jsonbViewer.RenderPreviewPanel(a.jsonbViewer.Width, previewHeight)
 
-			// Join panels side by side
-			combined := lipgloss.JoinHorizontal(
-				lipgloss.Top,
+			// Join panels vertically
+			combined := lipgloss.JoinVertical(
+				lipgloss.Left,
 				jsonbView,
-				strings.Repeat(" ", gap),
 				previewPanel,
 			)
 
