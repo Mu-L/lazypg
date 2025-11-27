@@ -143,23 +143,25 @@ func (p *PreviewPane) Height() int {
 		return 0
 	}
 
-	// Calculate content height
-	contentHeight := len(p.contentLines)
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-
-	// Apply max height constraint
 	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
-	if maxContentHeight < 1 {
-		maxContentHeight = 1
-	}
-	if contentHeight > maxContentHeight {
-		contentHeight = maxContentHeight
+	if maxContentHeight < 3 {
+		maxContentHeight = 3
 	}
 
-	// Add frame size for total height
-	return contentHeight + p.style.GetVerticalFrameSize()
+	// Content lines that will be shown (excluding header and footer)
+	contentLinesCount := len(p.contentLines)
+	maxContentLines := maxContentHeight - 2 // -2 for header and footer
+	if maxContentLines < 1 {
+		maxContentLines = 1
+	}
+	if contentLinesCount > maxContentLines {
+		contentLinesCount = maxContentLines
+	}
+
+	// Total = header (1) + content + footer (1)
+	totalLines := 1 + contentLinesCount + 1
+
+	return totalLines + p.style.GetVerticalFrameSize()
 }
 
 // IsScrollable returns true if content exceeds visible area
@@ -178,7 +180,11 @@ func (p *PreviewPane) ScrollUp() {
 // ScrollDown scrolls content down
 func (p *PreviewPane) ScrollDown() {
 	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
-	maxScroll := len(p.contentLines) - maxContentHeight
+	maxContentLines := maxContentHeight - 2 // -2 for header and footer
+	if maxContentLines < 1 {
+		maxContentLines = 1
+	}
+	maxScroll := len(p.contentLines) - maxContentLines
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
