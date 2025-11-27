@@ -629,8 +629,21 @@ func (jv *JSONBViewer) View() string {
 		sections = append(sections, instrStyle.Render(instr))
 	}
 
-	// Content (tree view or help)
-	contentHeight := jv.Height - 5
+	// Calculate preview pane height
+	previewHeight := 0
+	if jv.previewPane != nil && jv.previewPane.Visible {
+		// Set preview pane dimensions
+		maxPreviewHeight := jv.Height / 4
+		if maxPreviewHeight < 4 {
+			maxPreviewHeight = 4
+		}
+		jv.previewPane.Width = jv.Width - 4 // Account for container padding
+		jv.previewPane.MaxHeight = maxPreviewHeight
+		previewHeight = jv.previewPane.Height()
+	}
+
+	// Content (tree view or help) - adjust height for preview pane
+	contentHeight := jv.Height - 5 - previewHeight
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -642,6 +655,11 @@ func (jv *JSONBViewer) View() string {
 		content = jv.renderTree(contentHeight)
 	}
 	sections = append(sections, content)
+
+	// Preview pane (if visible)
+	if jv.previewPane != nil && previewHeight > 0 {
+		sections = append(sections, jv.previewPane.View())
+	}
 
 	// Status bar
 	statusBar := jv.renderStatus()
