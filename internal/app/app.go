@@ -836,6 +836,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Handle preview pane scrolling (when visible)
+				if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
+					switch msg.String() {
+					case "ctrl+up":
+						a.tableView.PreviewPane.ScrollUp()
+						return a, nil
+					case "ctrl+down":
+						a.tableView.PreviewPane.ScrollDown()
+						return a, nil
+					}
+				}
+
 				switch msg.String() {
 				case "up", "k":
 					a.tableView.MoveSelection(-1)
