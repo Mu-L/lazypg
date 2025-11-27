@@ -728,3 +728,41 @@ func (tv *TableView) GetMatchInfo() (current int, total int) {
 	}
 	return tv.CurrentMatch + 1, len(tv.Matches)
 }
+
+// IsCellTruncated checks if the currently selected cell content is truncated
+func (tv *TableView) IsCellTruncated() bool {
+	if tv.SelectedRow < 0 || tv.SelectedRow >= len(tv.Rows) {
+		return false
+	}
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.ColumnWidths) {
+		return false
+	}
+	if tv.SelectedCol >= len(tv.Rows[tv.SelectedRow]) {
+		return false
+	}
+
+	cellValue := tv.Rows[tv.SelectedRow][tv.SelectedCol]
+	colWidth := tv.ColumnWidths[tv.SelectedCol]
+
+	// Check if cell content width exceeds column width
+	return runewidth.StringWidth(cellValue) > colWidth
+}
+
+// GetSelectedCellContent returns the full content of the selected cell
+func (tv *TableView) GetSelectedCellContent() string {
+	if tv.SelectedRow < 0 || tv.SelectedRow >= len(tv.Rows) {
+		return ""
+	}
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.Rows[tv.SelectedRow]) {
+		return ""
+	}
+	return tv.Rows[tv.SelectedRow][tv.SelectedCol]
+}
+
+// GetSelectedColumnName returns the name of the currently selected column
+func (tv *TableView) GetSelectedColumnName() string {
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.Columns) {
+		return ""
+	}
+	return tv.Columns[tv.SelectedCol]
+}
