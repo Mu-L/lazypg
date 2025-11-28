@@ -36,8 +36,9 @@ type CommandPalette struct {
 	History  []models.Command // Query history
 
 	// Filtered results
-	Filtered []models.Command
-	Selected int
+	Filtered     []models.Command
+	Selected     int
+	ScrollOffset int // For scrolling when results exceed visible area
 
 	// Dimensions
 	Width  int
@@ -86,6 +87,7 @@ func (cp *CommandPalette) Reset() {
 	cp.Query = ""
 	cp.Mode = PaletteModeDefault
 	cp.Selected = 0
+	cp.ScrollOffset = 0
 	cp.Filter()
 }
 
@@ -115,16 +117,26 @@ func (cp *CommandPalette) parseInput() {
 
 // Update handles keyboard input for the command palette
 func (cp *CommandPalette) Update(msg tea.KeyMsg) (*CommandPalette, tea.Cmd) {
+	maxVisible := 8 // Max visible results
+
 	switch msg.String() {
 	case "up", "ctrl+p":
 		if cp.Selected > 0 {
 			cp.Selected--
+			// Scroll up if needed
+			if cp.Selected < cp.ScrollOffset {
+				cp.ScrollOffset = cp.Selected
+			}
 		}
 		return cp, nil
 
 	case "down", "ctrl+n":
 		if cp.Selected < len(cp.Filtered)-1 {
 			cp.Selected++
+			// Scroll down if needed
+			if cp.Selected >= cp.ScrollOffset+maxVisible {
+				cp.ScrollOffset = cp.Selected - maxVisible + 1
+			}
 		}
 		return cp, nil
 
@@ -244,6 +256,7 @@ func (cp *CommandPalette) Filter() {
 
 	cp.Filtered = filtered
 	cp.Selected = 0
+	cp.ScrollOffset = 0
 }
 
 // GetSelectedCommand returns the currently selected command, or nil if none
@@ -324,40 +337,59 @@ func (cp *CommandPalette) View() string {
 		Foreground(cp.Theme.Border).
 		Render(strings.Repeat("─", cp.Width-4))
 
-	// Results list
+	// Results list with scrolling
 	maxResults := 8
 	results := []string{}
 
-	for i, cmd := range cp.Filtered {
-		if i >= maxResults {
-			break
+	// Calculate visible range based on scroll offset
+	startIdx := cp.ScrollOffset
+	endIdx := cp.ScrollOffset + maxResults
+	if endIdx > len(cp.Filtered) {
+		endIdx = len(cp.Filtered)
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		cmd := cp.Filtered[i]
+		isSelected := i == cp.Selected
+
+		// Build content with styled parts
+		var content string
+
+		// Icon with color (unless selected, then use selection foreground)
+		if cmd.Icon != "" {
+			iconStyle := lipgloss.NewStyle().Foreground(cp.Theme.Info)
+			if isSelected {
+				iconStyle = lipgloss.NewStyle().Foreground(cp.Theme.Background)
+			}
+			content = iconStyle.Render(cmd.Icon) + " "
 		}
 
-		style := lipgloss.NewStyle().
-			Foreground(cp.Theme.Foreground).
+		// Label
+		labelStyle := lipgloss.NewStyle()
+		if isSelected {
+			labelStyle = labelStyle.Bold(true)
+		}
+		content += labelStyle.Render(cmd.Label)
+
+		// Description
+		if cmd.Description != "" {
+			descStyle := lipgloss.NewStyle().Foreground(cp.Theme.Metadata)
+			if isSelected {
+				descStyle = lipgloss.NewStyle().Foreground(cp.Theme.Background)
+			}
+			content += descStyle.Render(" - " + cmd.Description)
+		}
+
+		// Line style (background for selection)
+		lineStyle := lipgloss.NewStyle().
 			Padding(0, 1).
 			Width(cp.Width - 4)
 
-		if i == cp.Selected {
-			style = style.
-				Background(cp.Theme.BorderFocused).
-				Foreground(cp.Theme.Background).
-				Bold(true)
+		if isSelected {
+			lineStyle = lineStyle.Background(cp.Theme.BorderFocused)
 		}
 
-		icon := lipgloss.NewStyle().
-			Foreground(cp.Theme.Info).
-			Render(cmd.Icon + " ")
-
-		label := lipgloss.NewStyle().
-			Bold(i == cp.Selected).
-			Render(cmd.Label)
-
-		desc := lipgloss.NewStyle().
-			Foreground(cp.Theme.Metadata).
-			Render(" - " + cmd.Description)
-
-		line := style.Render(icon + label + desc)
+		line := lineStyle.Render(content)
 		results = append(results, line)
 	}
 
@@ -380,25 +412,33 @@ func (cp *CommandPalette) View() string {
 		results = append(results, emptyLineStyle.Render(""))
 	}
 
-	// Mode hints at bottom
-	hintStyle := lipgloss.NewStyle().
-		Foreground(cp.Theme.Comment).
-		Width(cp.Width - 4)
+	// Mode hints at bottom - keyboard shortcut style
+	bracketStyle := lipgloss.NewStyle().
+		Foreground(cp.Theme.Border)
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(cp.Theme.BorderFocused).
 		Bold(true)
 
-	sepStyle := lipgloss.NewStyle().
-		Foreground(cp.Theme.Border)
+	labelStyle := lipgloss.NewStyle().
+		Foreground(cp.Theme.Comment)
 
-	hints := keyStyle.Render(">") + hintStyle.Render("cmd") +
-		sepStyle.Render("  ") +
-		keyStyle.Render("@") + hintStyle.Render("table") +
-		sepStyle.Render("  ") +
-		keyStyle.Render("#") + hintStyle.Render("history")
+	// Build hint items: [>] Commands  [@] Tables  [#] History
+	cmdHint := bracketStyle.Render("[") + keyStyle.Render(">") + bracketStyle.Render("]") +
+		labelStyle.Render(" Commands")
 
-	hintLine := hintStyle.Render(hints)
+	tableHint := bracketStyle.Render("[") + keyStyle.Render("@") + bracketStyle.Render("]") +
+		labelStyle.Render(" Tables")
+
+	historyHint := bracketStyle.Render("[") + keyStyle.Render("#") + bracketStyle.Render("]") +
+		labelStyle.Render(" History")
+
+	hints := cmdHint + labelStyle.Render("   ") + tableHint + labelStyle.Render("   ") + historyHint
+
+	hintLine := lipgloss.NewStyle().
+		Width(cp.Width - 4).
+		Padding(0, 1).
+		Render(hints)
 
 	// Bottom separator
 	bottomSeparator := lipgloss.NewStyle().
