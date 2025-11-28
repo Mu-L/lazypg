@@ -276,7 +276,7 @@ func (sv *StructureView) Update(msg tea.KeyMsg) {
 	}
 }
 
-// getCurrentTableView returns the TableView for the current structure tab
+// getCurrentTableView returns the TableView for the current structure tab (internal use)
 func (sv *StructureView) getCurrentTableView() *TableView {
 	switch sv.activeTab {
 	case 1:
@@ -287,6 +287,23 @@ func (sv *StructureView) getCurrentTableView() *TableView {
 		return sv.indexesTable
 	default:
 		return nil
+	}
+}
+
+// GetActiveTableView returns the TableView for the current tab (including Data tab)
+// Returns the main tableView for Data tab (0), or structure tables for other tabs
+func (sv *StructureView) GetActiveTableView() *TableView {
+	switch sv.activeTab {
+	case 0:
+		return sv.tableView
+	case 1:
+		return sv.columnsTable
+	case 2:
+		return sv.constraintsTable
+	case 3:
+		return sv.indexesTable
+	default:
+		return sv.tableView
 	}
 }
 

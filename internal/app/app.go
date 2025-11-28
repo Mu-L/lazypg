@@ -816,22 +816,43 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Handle table navigation when right panel is focused
 			if a.state.FocusedPanel == models.RightPanel && a.state.ViewMode == models.NormalMode {
+				// Handle preview pane scrolling (when visible) for any tab
+				activeTable := a.structureView.GetActiveTableView()
+				if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
+					switch msg.String() {
+					case "ctrl+up":
+						activeTable.PreviewPane.ScrollUp()
+						return a, nil
+					case "ctrl+down":
+						activeTable.PreviewPane.ScrollDown()
+						return a, nil
+					}
+				}
+
+				// Handle preview pane toggle for all tabs (before routing to structure view)
+				if msg.String() == "p" {
+					activeTable := a.structureView.GetActiveTableView()
+					if activeTable != nil {
+						activeTable.TogglePreviewPane()
+					}
+					return a, nil
+				}
+
+				// Handle yank for all tabs (before routing to structure view)
+				if msg.String() == "y" {
+					activeTable := a.structureView.GetActiveTableView()
+					if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
+						if err := activeTable.PreviewPane.CopyContent(); err == nil {
+							log.Println("Copied preview content to clipboard")
+						}
+					}
+					return a, nil
+				}
+
 				// If structure view is active and not on Data tab, route to structure view
 				if a.currentTab > 0 {
 					a.structureView.Update(msg)
 					return a, nil
-				}
-
-				// Handle preview pane scrolling (when visible)
-				if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
-					switch msg.String() {
-					case "ctrl+up":
-						a.tableView.PreviewPane.ScrollUp()
-						return a, nil
-					case "ctrl+down":
-						a.tableView.PreviewPane.ScrollDown()
-						return a, nil
-					}
 				}
 
 				// Toggle relative line numbers
@@ -974,18 +995,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.searchInput.Reset()
 					a.searchInput.Width = a.rightPanel.Width - 4
 					a.showSearch = true
-					return a, nil
-				case "p":
-					// Toggle preview pane
-					a.tableView.TogglePreviewPane()
-					return a, nil
-				case "y":
-					// Copy preview pane content (yank)
-					if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
-						if err := a.tableView.PreviewPane.CopyContent(); err == nil {
-							log.Println("Copied preview content to clipboard")
-						}
-					}
 					return a, nil
 				case "n":
 					// Next search match
@@ -1428,15 +1437,17 @@ func (a *App) renderRightPanel(width, height int) string {
 	// If table is selected, show structure view with tabs
 	if a.currentTable != "" {
 		// Calculate preview pane height (only if visible)
+		// Get active table view for preview pane handling
+		activeTable := a.structureView.GetActiveTableView()
 		previewHeight := 0
-		if a.currentTab == 0 && a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
+		if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
 			// Set preview pane dimensions (max 1/3 of available height)
 			maxPreviewHeight := height / 3
 			if maxPreviewHeight < 5 {
 				maxPreviewHeight = 5
 			}
-			a.tableView.SetPreviewPaneDimensions(width, maxPreviewHeight)
-			previewHeight = a.tableView.GetPreviewPaneHeight()
+			activeTable.SetPreviewPaneDimensions(width, maxPreviewHeight)
+			previewHeight = activeTable.GetPreviewPaneHeight()
 		}
 
 		// Calculate main content height (subtract preview pane height)
@@ -1468,9 +1479,9 @@ func (a *App) renderRightPanel(width, height int) string {
 		// Render main content
 		mainContent := a.structureView.View()
 
-		// If on Data tab and preview pane is visible, append it
-		if a.currentTab == 0 && previewHeight > 0 {
-			previewContent := a.tableView.PreviewPane.View()
+		// If preview pane is visible, append it
+		if activeTable != nil && previewHeight > 0 {
+			previewContent := activeTable.PreviewPane.View()
 			return lipgloss.JoinVertical(lipgloss.Left, mainContent, previewContent)
 		}
 
