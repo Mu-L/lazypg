@@ -66,6 +66,11 @@ type App struct {
 	showQuickQuery bool
 	quickQuery     *components.QuickQuery
 
+	// SQL Editor (replaces Quick Query)
+	sqlEditor        *components.SQLEditor
+	resultTabs       *components.ResultTabs
+	sqlEditorFocused bool // true when SQL editor has focus
+
 	// History
 	historyStore *history.Store
 
@@ -226,6 +231,8 @@ func New(cfg *config.Config) *App {
 		commandRegistry:   registry,
 		commandPalette:    components.NewCommandPalette(th),
 		quickQuery:        components.NewQuickQuery(th),
+		sqlEditor:         components.NewSQLEditor(th),
+		resultTabs:        components.NewResultTabs(th),
 		historyStore:      historyStore,
 		tableView:         tableView,
 		showFilterBuilder: false,
