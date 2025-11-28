@@ -420,13 +420,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Display results in table view
-		a.tableView.SetData(msg.Result.Columns, msg.Result.Rows, len(msg.Result.Rows))
+		// Add result to result tabs
+		a.resultTabs.AddResult(msg.SQL, msg.Result)
+
+		// Collapse the SQL editor after successful execution
+		a.sqlEditor.Collapse()
+		a.sqlEditorFocused = false
+
+		// Focus the data panel
 		a.state.FocusedPanel = models.RightPanel
 		a.updatePanelStyles()
-
-		// Show success message briefly (could add a toast notification system)
-		// For now, just show in the status that would be visible
 
 		return a, nil
 
