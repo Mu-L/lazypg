@@ -19,6 +19,11 @@ const (
 	SQLEditorLarge                               // 50% of available height
 )
 
+// ExecuteQueryMsg is sent when a query should be executed
+type ExecuteQueryMsg struct {
+	SQL string
+}
+
 // OpenExternalEditorMsg requests opening an external editor
 type OpenExternalEditorMsg struct {
 	Content string

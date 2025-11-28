@@ -1969,10 +1969,6 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Should not reach here
-		a.showConnectionDialog = false
-		return a, nil
-
 	default:
 		// In manual mode, delegate to textinput for cursor and text handling
 		if a.connectionDialog.ManualMode {
