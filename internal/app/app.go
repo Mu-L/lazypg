@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -93,6 +94,17 @@ type App struct {
 	// Search input
 	showSearch  bool
 	searchInput *components.SearchInput
+
+	// Table jump (Ctrl+T)
+	showTableJump bool
+	tableJumpList []tableJumpItem // Cached list of tables/views
+}
+
+// tableJumpItem represents a table or view for quick jump
+type tableJumpItem struct {
+	Schema string
+	Name   string
+	IsView bool
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -682,6 +694,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.showFavorites = true
 			return a, nil
+		case "ctrl+t":
+			// Open table jump dialog
+			a.buildTableJumpList()
+			if len(a.tableJumpList) > 0 {
+				// Convert to commands for command palette
+				cmds := make([]models.Command, len(a.tableJumpList))
+				for i, item := range a.tableJumpList {
+					icon := "▦"
+					if item.IsView {
+						icon = "◎"
+					}
+					cmds[i] = models.Command{
+						ID:          fmt.Sprintf("table:%s.%s", item.Schema, item.Name),
+						Label:       fmt.Sprintf("%s %s.%s", icon, item.Schema, item.Name),
+						Description: "",
+					}
+				}
+				a.commandPalette.SetCommands(cmds)
+				a.showTableJump = true
+				a.showCommandPalette = true
+			}
+			return a, nil
 		case "q", "ctrl+c":
 			// Don't quit if in help mode, exit help instead
 			if a.state.ViewMode == models.HelpMode {
@@ -763,16 +797,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case "ctrl+r":
+			// Refresh current table data (preserve sort and filter)
+			if a.currentTable != "" {
+				parts := strings.Split(a.currentTable, ".")
+				if len(parts) == 2 {
+					msg := LoadTableDataMsg{
+						Schema:     parts[0],
+						Table:      parts[1],
+						Limit:      100,
+						Offset:     0,
+						SortColumn: a.tableView.GetSortColumn(),
+						SortDir:    a.tableView.GetSortDirection(),
+						NullsFirst: a.tableView.GetNullsFirst(),
+					}
+					if a.activeFilter != nil {
+						return a, a.loadTableDataWithFilter(*a.activeFilter)
+					}
+					return a, a.loadTableData(msg)
+				}
+			}
+			return a, nil
+		case "ctrl+x":
 			// Clear filter and reload
 			if a.activeFilter != nil && a.state.TreeSelected != nil {
 				a.activeFilter = nil
 				schemaNode := a.state.TreeSelected.Parent
 				if schemaNode != nil {
 					return a, a.loadTableData(LoadTableDataMsg{
-						Schema: schemaNode.Label,
-						Table:  a.state.TreeSelected.Label,
-						Limit:  100,
-						Offset: 0,
+						Schema:     schemaNode.Label,
+						Table:      a.state.TreeSelected.Label,
+						Limit:      100,
+						Offset:     0,
+						SortColumn: a.tableView.GetSortColumn(),
+						SortDir:    a.tableView.GetSortDirection(),
+						NullsFirst: a.tableView.GetNullsFirst(),
 					})
 				}
 			}
@@ -839,7 +897,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Handle yank for all tabs (before routing to structure view)
+				// y = copy current cell, Y = copy preview pane content
 				if msg.String() == "y" {
+					activeTable := a.structureView.GetActiveTableView()
+					if activeTable != nil {
+						row, col := activeTable.GetSelectedCell()
+						if row >= 0 && col >= 0 && row < len(activeTable.Rows) && col < len(activeTable.Rows[row]) {
+							cellContent := activeTable.Rows[row][col]
+							if err := clipboard.WriteAll(cellContent); err == nil {
+								log.Println("Copied cell content to clipboard")
+							}
+						}
+					}
+					return a, nil
+				}
+				if msg.String() == "Y" {
 					activeTable := a.structureView.GetActiveTableView()
 					if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
 						if err := activeTable.PreviewPane.CopyContent(); err == nil {
@@ -1033,20 +1105,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case components.TreeNodeSelectedMsg:
-		// Handle table selection
-		if msg.Node != nil && msg.Node.Type == models.TreeNodeTypeTable {
-			// Parse table info from node ID: "table:db.schema.table"
-			// For now, we need to get schema and table name
-			// Since we're using schema nodes with ID "schema:db.schema", we can get parent
-			schemaNode := msg.Node.Parent
-			if schemaNode != nil && schemaNode.Type == models.TreeNodeTypeSchema {
-				schema := schemaNode.Label
+		// Handle table or view selection
+		if msg.Node != nil && (msg.Node.Type == models.TreeNodeTypeTable || msg.Node.Type == models.TreeNodeTypeView) {
+			// Get schema name by traversing up the tree
+			// Structure: Schema -> TableGroup/ViewGroup -> Table/View
+			var schemaName string
+			groupNode := msg.Node.Parent
+			if groupNode != nil && (groupNode.Type == models.TreeNodeTypeTableGroup || groupNode.Type == models.TreeNodeTypeViewGroup) {
+				schemaNode := groupNode.Parent
+				if schemaNode != nil && schemaNode.Type == models.TreeNodeTypeSchema {
+					// Extract schema name from label (may contain count info like "public (35 tables, 5 views)")
+					schemaName = strings.Split(schemaNode.Label, " ")[0]
+				}
+			}
+
+			if schemaName != "" {
 				table := msg.Node.Label
-				a.currentTable = schema + "." + table
+				a.currentTable = schemaName + "." + table
 
 				return a, func() tea.Msg {
 					return LoadTableDataMsg{
-						Schema: schema,
+						Schema: schemaName,
 						Table:  table,
 						Offset: 0,
 						Limit:  100,
@@ -1858,12 +1937,37 @@ func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check if we got a close message
 	if msg.String() == "esc" || msg.String() == "ctrl+c" {
 		a.showCommandPalette = false
+		a.showTableJump = false
 		return a, nil
 	}
 
 	// Execute the command if Enter was pressed
 	if msg.String() == "enter" {
 		a.showCommandPalette = false
+
+		// Handle table jump mode
+		if a.showTableJump {
+			a.showTableJump = false
+			selected := a.commandPalette.GetSelectedCommand()
+			if selected != nil && strings.HasPrefix(selected.ID, "table:") {
+				// Parse schema.table from ID
+				parts := strings.SplitN(strings.TrimPrefix(selected.ID, "table:"), ".", 2)
+				if len(parts) == 2 {
+					schema := parts[0]
+					table := parts[1]
+					a.currentTable = schema + "." + table
+
+					return a, func() tea.Msg {
+						return LoadTableDataMsg{
+							Schema: schema,
+							Table:  table,
+							Offset: 0,
+							Limit:  100,
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return a, cmd
@@ -1997,7 +2101,6 @@ func (a *App) loadTree() tea.Msg {
 	currentDB := conn.Config.Database
 
 	// Build simple tree with just current database for now
-	// Later we'll expand this to load schemas and tables
 	root := models.BuildDatabaseTree([]string{currentDB}, currentDB)
 
 	// Load schemas for the current database
@@ -2011,16 +2114,36 @@ func (a *App) loadTree() tea.Msg {
 	if dbNode != nil {
 		// Add schema nodes as children
 		for _, schema := range schemas {
+			// Load tables and views for this schema
+			tables, _ := metadata.ListTables(ctx, conn.Pool, schema.Name)
+			views, _ := metadata.ListViews(ctx, conn.Pool, schema.Name)
+
+			// Create schema label with counts
+			schemaLabel := schema.Name
+			if len(tables) > 0 || len(views) > 0 {
+				if len(views) > 0 {
+					schemaLabel = fmt.Sprintf("%s (%d tables, %d views)", schema.Name, len(tables), len(views))
+				} else {
+					schemaLabel = fmt.Sprintf("%s (%d)", schema.Name, len(tables))
+				}
+			}
+
 			schemaNode := models.NewTreeNode(
 				fmt.Sprintf("schema:%s.%s", currentDB, schema.Name),
 				models.TreeNodeTypeSchema,
-				schema.Name,
+				schemaLabel,
 			)
 			schemaNode.Selectable = true
 
-			// Load tables for this schema
-			tables, err := metadata.ListTables(ctx, conn.Pool, schema.Name)
-			if err == nil {
+			// Add Tables group if there are tables
+			if len(tables) > 0 {
+				tablesGroup := models.NewTreeNode(
+					fmt.Sprintf("tables:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeTableGroup,
+					fmt.Sprintf("Tables (%d)", len(tables)),
+				)
+				tablesGroup.Selectable = false
+
 				for _, table := range tables {
 					tableNode := models.NewTreeNode(
 						fmt.Sprintf("table:%s.%s.%s", currentDB, schema.Name, table.Name),
@@ -2028,17 +2151,84 @@ func (a *App) loadTree() tea.Msg {
 						table.Name,
 					)
 					tableNode.Selectable = true
-					schemaNode.AddChild(tableNode)
+					tablesGroup.AddChild(tableNode)
 				}
-				schemaNode.Loaded = true
+				tablesGroup.Loaded = true
+				schemaNode.AddChild(tablesGroup)
 			}
 
+			// Add Views group if there are views
+			if len(views) > 0 {
+				viewsGroup := models.NewTreeNode(
+					fmt.Sprintf("views:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeViewGroup,
+					fmt.Sprintf("Views (%d)", len(views)),
+				)
+				viewsGroup.Selectable = false
+
+				for _, view := range views {
+					viewNode := models.NewTreeNode(
+						fmt.Sprintf("view:%s.%s.%s", currentDB, schema.Name, view.Name),
+						models.TreeNodeTypeView,
+						view.Name,
+					)
+					viewNode.Selectable = true
+					viewsGroup.AddChild(viewNode)
+				}
+				viewsGroup.Loaded = true
+				schemaNode.AddChild(viewsGroup)
+			}
+
+			schemaNode.Loaded = true
 			dbNode.AddChild(schemaNode)
 		}
 		dbNode.Loaded = true
 	}
 
 	return TreeLoadedMsg{Root: root}
+}
+
+// buildTableJumpList builds the list of tables/views for Ctrl+T jump
+func (a *App) buildTableJumpList() {
+	a.tableJumpList = nil
+
+	if a.treeView.Root == nil {
+		return
+	}
+
+	// Traverse tree to find all tables and views
+	var traverse func(node *models.TreeNode)
+	traverse = func(node *models.TreeNode) {
+		if node == nil {
+			return
+		}
+
+		if node.Type == models.TreeNodeTypeTable || node.Type == models.TreeNodeTypeView {
+			// Get schema name from parent chain
+			var schemaName string
+			parent := node.Parent
+			for parent != nil {
+				if parent.Type == models.TreeNodeTypeSchema {
+					schemaName = strings.Split(parent.Label, " ")[0]
+					break
+				}
+				parent = parent.Parent
+			}
+			if schemaName != "" {
+				a.tableJumpList = append(a.tableJumpList, tableJumpItem{
+					Schema: schemaName,
+					Name:   node.Label,
+					IsView: node.Type == models.TreeNodeTypeView,
+				})
+			}
+		}
+
+		for _, child := range node.Children {
+			traverse(child)
+		}
+	}
+
+	traverse(a.treeView.Root)
 }
 
 // loadTableData loads table data with pagination

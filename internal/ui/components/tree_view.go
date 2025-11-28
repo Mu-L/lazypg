@@ -44,6 +44,11 @@ type TreeView struct {
 	Height       int              // Display height
 	Theme        theme.Theme      // Color theme
 	ScrollOffset int              // Vertical scroll offset for viewport
+
+	// Search/filter state
+	SearchMode   bool   // Whether search mode is active
+	SearchQuery  string // Current search query
+	FilterActive bool   // Whether filter is applied to tree
 }
 
 // TreeNodeSelectedMsg is sent when a node is selected (Enter key)
@@ -299,9 +304,29 @@ func (tv *TreeView) getNodeIcon(node *models.TreeNode) string {
 			iconColor = tv.Theme.SchemaCollapsed
 		}
 
+	case models.TreeNodeTypeTableGroup:
+		if node.Expanded {
+			icon = "▾"
+		} else {
+			icon = "▸"
+		}
+		iconColor = tv.Theme.TableIcon
+
+	case models.TreeNodeTypeViewGroup:
+		if node.Expanded {
+			icon = "▾"
+		} else {
+			icon = "▸"
+		}
+		iconColor = tv.Theme.Metadata
+
 	case models.TreeNodeTypeTable:
 		icon = "▦"
 		iconColor = tv.Theme.TableIcon
+
+	case models.TreeNodeTypeView:
+		icon = "◎"
+		iconColor = tv.Theme.Metadata
 
 	case models.TreeNodeTypeColumn:
 		icon = "•"
@@ -334,15 +359,13 @@ func (tv *TreeView) buildNodeLabel(node *models.TreeNode) string {
 		// Just show the database name
 
 	case models.TreeNodeTypeSchema:
-		// Show table count or "empty" for schemas
-		if node.Loaded {
-			childCount := len(node.Children)
-			if childCount == 0 {
-				label += " " + metaStyle.Render("∅")
-			} else {
-				label += " " + metaStyle.Render(fmt.Sprintf("(%d)", childCount))
-			}
+		// Label already includes count info from loadTree, show empty marker if no children
+		if node.Loaded && len(node.Children) == 0 {
+			label += " " + metaStyle.Render("∅")
 		}
+
+	case models.TreeNodeTypeTableGroup, models.TreeNodeTypeViewGroup:
+		// Label already includes count from loadTree
 
 	case models.TreeNodeTypeTable:
 		// Add row count if available with better formatting

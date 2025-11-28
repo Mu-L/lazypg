@@ -155,6 +155,14 @@ func (cp *CommandPalette) Filter() {
 	cp.Selected = 0
 }
 
+// GetSelectedCommand returns the currently selected command, or nil if none
+func (cp *CommandPalette) GetSelectedCommand() *models.Command {
+	if cp.Selected >= 0 && cp.Selected < len(cp.Filtered) {
+		return &cp.Filtered[cp.Selected]
+	}
+	return nil
+}
+
 // View renders the command palette
 func (cp *CommandPalette) View() string {
 	// Input box

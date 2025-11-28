@@ -9,11 +9,14 @@ import (
 type TreeNodeType string
 
 const (
-	TreeNodeTypeRoot     TreeNodeType = "root"
-	TreeNodeTypeDatabase TreeNodeType = "database"
-	TreeNodeTypeSchema   TreeNodeType = "schema"
-	TreeNodeTypeTable    TreeNodeType = "table"
-	TreeNodeTypeColumn   TreeNodeType = "column"
+	TreeNodeTypeRoot       TreeNodeType = "root"
+	TreeNodeTypeDatabase   TreeNodeType = "database"
+	TreeNodeTypeSchema     TreeNodeType = "schema"
+	TreeNodeTypeTableGroup TreeNodeType = "table_group" // "Tables" folder under schema
+	TreeNodeTypeViewGroup  TreeNodeType = "view_group"  // "Views" folder under schema
+	TreeNodeTypeTable      TreeNodeType = "table"
+	TreeNodeTypeView       TreeNodeType = "view"
+	TreeNodeTypeColumn     TreeNodeType = "column"
 )
 
 // TreeNode represents a node in the navigation tree

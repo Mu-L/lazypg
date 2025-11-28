@@ -32,6 +32,12 @@ type Table struct {
 	Size     string
 }
 
+// View represents a PostgreSQL view
+type View struct {
+	Schema string
+	Name   string
+}
+
 // ListSchemas returns all schemas in the current database
 func ListSchemas(ctx context.Context, pool *connection.Pool) ([]Schema, error) {
 	query := `
@@ -89,6 +95,33 @@ func ListTables(ctx context.Context, pool *connection.Pool, schema string) ([]Ta
 	}
 
 	return tables, nil
+}
+
+// ListViews returns all views in a schema
+func ListViews(ctx context.Context, pool *connection.Pool, schema string) ([]View, error) {
+	query := `
+		SELECT
+			schemaname as schema,
+			viewname as name
+		FROM pg_catalog.pg_views
+		WHERE schemaname = $1
+		ORDER BY viewname;
+	`
+
+	rows, err := pool.Query(ctx, query, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]View, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, View{
+			Schema: toString(row["schema"]),
+			Name:   toString(row["name"]),
+		})
+	}
+
+	return views, nil
 }
 
 // GetTableRowCount returns the estimated row count for a table
