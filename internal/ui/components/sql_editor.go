@@ -132,3 +132,131 @@ func (e *SQLEditor) Clear() {
 func (e *SQLEditor) GetCollapsedHeight() int {
 	return 4 // 2 content lines + 2 border lines
 }
+
+// MoveCursorLeft moves cursor left
+func (e *SQLEditor) MoveCursorLeft() {
+	if e.cursorCol > 0 {
+		e.cursorCol--
+	} else if e.cursorRow > 0 {
+		// Move to end of previous line
+		e.cursorRow--
+		e.cursorCol = len(e.lines[e.cursorRow])
+	}
+}
+
+// MoveCursorRight moves cursor right
+func (e *SQLEditor) MoveCursorRight() {
+	if e.cursorCol < len(e.lines[e.cursorRow]) {
+		e.cursorCol++
+	} else if e.cursorRow < len(e.lines)-1 {
+		// Move to start of next line
+		e.cursorRow++
+		e.cursorCol = 0
+	}
+}
+
+// MoveCursorUp moves cursor up
+func (e *SQLEditor) MoveCursorUp() {
+	if e.cursorRow > 0 {
+		e.cursorRow--
+		// Clamp column to line length
+		if e.cursorCol > len(e.lines[e.cursorRow]) {
+			e.cursorCol = len(e.lines[e.cursorRow])
+		}
+	}
+}
+
+// MoveCursorDown moves cursor down
+func (e *SQLEditor) MoveCursorDown() {
+	if e.cursorRow < len(e.lines)-1 {
+		e.cursorRow++
+		// Clamp column to line length
+		if e.cursorCol > len(e.lines[e.cursorRow]) {
+			e.cursorCol = len(e.lines[e.cursorRow])
+		}
+	}
+}
+
+// MoveCursorToLineStart moves cursor to start of line
+func (e *SQLEditor) MoveCursorToLineStart() {
+	e.cursorCol = 0
+}
+
+// MoveCursorToLineEnd moves cursor to end of line
+func (e *SQLEditor) MoveCursorToLineEnd() {
+	e.cursorCol = len(e.lines[e.cursorRow])
+}
+
+// MoveCursorToDocStart moves cursor to start of document
+func (e *SQLEditor) MoveCursorToDocStart() {
+	e.cursorRow = 0
+	e.cursorCol = 0
+}
+
+// MoveCursorToDocEnd moves cursor to end of document
+func (e *SQLEditor) MoveCursorToDocEnd() {
+	e.cursorRow = len(e.lines) - 1
+	e.cursorCol = len(e.lines[e.cursorRow])
+}
+
+// InsertChar inserts a character at cursor position
+func (e *SQLEditor) InsertChar(ch rune) {
+	line := e.lines[e.cursorRow]
+	// Insert character at cursor position
+	newLine := line[:e.cursorCol] + string(ch) + line[e.cursorCol:]
+	e.lines[e.cursorRow] = newLine
+	e.cursorCol++
+}
+
+// InsertNewline inserts a new line at cursor position
+func (e *SQLEditor) InsertNewline() {
+	line := e.lines[e.cursorRow]
+	// Split line at cursor
+	before := line[:e.cursorCol]
+	after := line[e.cursorCol:]
+
+	e.lines[e.cursorRow] = before
+	// Insert new line after current
+	newLines := make([]string, len(e.lines)+1)
+	copy(newLines[:e.cursorRow+1], e.lines[:e.cursorRow+1])
+	newLines[e.cursorRow+1] = after
+	copy(newLines[e.cursorRow+2:], e.lines[e.cursorRow+1:])
+	e.lines = newLines
+
+	e.cursorRow++
+	e.cursorCol = 0
+}
+
+// DeleteCharBefore deletes character before cursor (backspace)
+func (e *SQLEditor) DeleteCharBefore() {
+	if e.cursorCol > 0 {
+		// Delete character before cursor
+		line := e.lines[e.cursorRow]
+		e.lines[e.cursorRow] = line[:e.cursorCol-1] + line[e.cursorCol:]
+		e.cursorCol--
+	} else if e.cursorRow > 0 {
+		// Merge with previous line
+		prevLine := e.lines[e.cursorRow-1]
+		currLine := e.lines[e.cursorRow]
+		e.cursorCol = len(prevLine)
+		e.lines[e.cursorRow-1] = prevLine + currLine
+		// Remove current line
+		e.lines = append(e.lines[:e.cursorRow], e.lines[e.cursorRow+1:]...)
+		e.cursorRow--
+	}
+}
+
+// DeleteCharAfter deletes character after cursor (delete key)
+func (e *SQLEditor) DeleteCharAfter() {
+	line := e.lines[e.cursorRow]
+	if e.cursorCol < len(line) {
+		// Delete character at cursor
+		e.lines[e.cursorRow] = line[:e.cursorCol] + line[e.cursorCol+1:]
+	} else if e.cursorRow < len(e.lines)-1 {
+		// Merge with next line
+		nextLine := e.lines[e.cursorRow+1]
+		e.lines[e.cursorRow] = line + nextLine
+		// Remove next line
+		e.lines = append(e.lines[:e.cursorRow+1], e.lines[e.cursorRow+2:]...)
+	}
+}
