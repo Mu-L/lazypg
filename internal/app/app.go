@@ -1478,7 +1478,59 @@ func (a *App) renderNormalView() string {
 
 // renderRightPanel renders the right panel content based on current state
 func (a *App) renderRightPanel(width, height int) string {
-	// If table is selected, show structure view with tabs
+	// Calculate SQL editor height
+	editorHeight := a.sqlEditor.GetCollapsedHeight()
+	if a.sqlEditor.IsExpanded() {
+		editorHeight = int(float64(height) * a.sqlEditor.GetHeightRatio())
+		if editorHeight < 5 {
+			editorHeight = 5
+		}
+	}
+
+	// Calculate data panel height (reserve space for tab bar if tabs exist)
+	tabBarHeight := 0
+	if a.resultTabs.HasTabs() {
+		tabBarHeight = 1
+	}
+	dataPanelHeight := height - editorHeight - tabBarHeight
+	if dataPanelHeight < 5 {
+		dataPanelHeight = 5
+	}
+
+	// Render tab bar
+	tabBar := ""
+	if a.resultTabs.HasTabs() {
+		tabBar = a.resultTabs.RenderTabBar(width)
+	}
+
+	// Render data panel
+	dataPanel := a.renderDataPanel(width, dataPanelHeight)
+
+	// Render SQL editor
+	a.sqlEditor.Width = width
+	a.sqlEditor.Height = editorHeight
+	sqlEditorView := a.sqlEditor.View()
+
+	// Combine vertically: tab bar + data + editor
+	if tabBar != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, dataPanel, sqlEditorView)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, dataPanel, sqlEditorView)
+}
+
+// renderDataPanel renders the data panel (table view or structure view)
+func (a *App) renderDataPanel(width, height int) string {
+	// If we have result tabs, show the active tab's table view
+	if a.resultTabs.HasTabs() {
+		activeTable := a.resultTabs.GetActiveTableView()
+		if activeTable != nil {
+			activeTable.Width = width
+			activeTable.Height = height
+			return activeTable.View()
+		}
+	}
+
+	// If table is selected in tree, show structure view
 	if a.currentTable != "" {
 		// Calculate preview pane height (only if visible)
 		// Get active table view for preview pane handling
@@ -1532,10 +1584,14 @@ func (a *App) renderRightPanel(width, height int) string {
 		return mainContent
 	}
 
-	// No table selected - show table view (will display empty state)
-	a.tableView.Width = width
-	a.tableView.Height = height
-	return a.tableView.View()
+	// No data - show placeholder
+	placeholderStyle := lipgloss.NewStyle().
+		Foreground(a.theme.Comment).
+		Width(width).
+		Height(height).
+		Align(lipgloss.Center, lipgloss.Center)
+
+	return placeholderStyle.Render("No data to display\n\nPress Ctrl+E to open SQL editor")
 }
 
 // updatePanelDimensions calculates panel sizes based on window size
