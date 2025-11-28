@@ -40,6 +40,8 @@ func ListSchemas(ctx context.Context, pool *connection.Pool) ([]Schema, error) {
 			schema_owner as owner
 		FROM information_schema.schemata
 		WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+		  AND schema_name NOT LIKE 'pg_temp_%'
+		  AND schema_name NOT LIKE 'pg_toast_temp_%'
 		ORDER BY schema_name;
 	`
 
