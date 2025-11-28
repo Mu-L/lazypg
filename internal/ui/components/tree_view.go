@@ -512,3 +512,37 @@ func (tv *TreeView) SetCursorToNode(nodeID string) bool {
 
 	return false
 }
+
+// ExpandAndNavigateToNode expands all ancestors of a node and moves cursor to it
+// This is useful for programmatic navigation (e.g., from table jump dialog)
+func (tv *TreeView) ExpandAndNavigateToNode(nodeID string) bool {
+	if tv.Root == nil {
+		return false
+	}
+
+	// Find the node by ID
+	targetNode := tv.Root.FindByID(nodeID)
+	if targetNode == nil {
+		return false
+	}
+
+	// Expand all ancestors from root to parent
+	current := targetNode.Parent
+	for current != nil && current.Type != models.TreeNodeTypeRoot {
+		current.Expanded = true
+		current = current.Parent
+	}
+
+	// Now the node should be visible, set cursor to it
+	visibleNodes := tv.Root.Flatten()
+	for i, node := range visibleNodes {
+		if node.ID == nodeID {
+			tv.CursorIndex = i
+			// Adjust scroll offset to make the node visible
+			tv.adjustScrollOffset(len(visibleNodes), tv.Height)
+			return true
+		}
+	}
+
+	return false
+}

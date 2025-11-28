@@ -94,18 +94,8 @@ type App struct {
 	// Search input
 	showSearch  bool
 	searchInput *components.SearchInput
-
-	// Table jump (Ctrl+T)
-	showTableJump bool
-	tableJumpList []tableJumpItem // Cached list of tables/views
 }
 
-// tableJumpItem represents a table or view for quick jump
-type tableJumpItem struct {
-	Schema string
-	Name   string
-	IsView bool
-}
 
 // DiscoveryCompleteMsg is sent when discovery completes
 type DiscoveryCompleteMsg struct {
@@ -683,8 +673,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showQuickQuery = true
 			return a, nil
 		case "ctrl+k":
-			// Open command palette and populate with commands including history
-			a.commandPalette.SetCommands(a.getCommandsWithHistory())
+			// Open unified command palette
+			a.commandPalette.Reset()
+			a.commandPalette.SetCommands(a.getBuiltinCommands())
+			a.commandPalette.SetTables(a.getTableCommands())
+			a.commandPalette.SetHistory(a.getHistoryCommands())
 			a.showCommandPalette = true
 			return a, nil
 		case "ctrl+b":
@@ -693,28 +686,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
 			}
 			a.showFavorites = true
-			return a, nil
-		case "ctrl+t":
-			// Open table jump dialog
-			a.buildTableJumpList()
-			if len(a.tableJumpList) > 0 {
-				// Convert to commands for command palette
-				cmds := make([]models.Command, len(a.tableJumpList))
-				for i, item := range a.tableJumpList {
-					icon := "▦"
-					if item.IsView {
-						icon = "◎"
-					}
-					cmds[i] = models.Command{
-						ID:          fmt.Sprintf("table:%s.%s", item.Schema, item.Name),
-						Label:       fmt.Sprintf("%s %s.%s", icon, item.Schema, item.Name),
-						Description: "",
-					}
-				}
-				a.commandPalette.SetCommands(cmds)
-				a.showTableJump = true
-				a.showCommandPalette = true
-			}
 			return a, nil
 		case "q", "ctrl+c":
 			// Don't quit if in help mode, exit help instead
@@ -1216,30 +1187,6 @@ func (a *App) View() string {
 		return a.renderConnectionDialog()
 	}
 
-	// If command palette is showing, render it on top of everything
-	if a.showCommandPalette {
-		normalView := a.renderNormalView()
-		// Set command palette dimensions
-		a.commandPalette.Width = 80
-		if a.commandPalette.Width > a.state.Width-4 {
-			a.commandPalette.Width = a.state.Width - 4
-		}
-		a.commandPalette.Height = 20
-
-		paletteView := lipgloss.Place(
-			a.state.Width, a.state.Height,
-			lipgloss.Center, lipgloss.Center,
-			a.commandPalette.View(),
-		)
-
-		// Overlay palette on normal view
-		return lipgloss.Place(
-			a.state.Width, a.state.Height,
-			lipgloss.Left, lipgloss.Top,
-			normalView,
-		) + "\n" + paletteView
-	}
-
 	// If in help mode, show help overlay
 	if a.state.ViewMode == models.HelpMode {
 		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
@@ -1497,6 +1444,17 @@ func (a *App) renderNormalView() string {
 			lipgloss.WithWhitespaceChars(" "),
 			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
 		)
+	}
+
+	// Render command palette if visible (as overlay on top of mainView)
+	if a.showCommandPalette {
+		a.commandPalette.Width = 80
+		if a.commandPalette.Width > a.state.Width-4 {
+			a.commandPalette.Width = a.state.Width - 4
+		}
+		a.commandPalette.Height = 20
+
+		mainView = a.overlayCommandPalette(mainView)
 	}
 
 	// Render search input if visible (as overlay on top of mainView)
@@ -1891,41 +1849,106 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// getCommandsWithHistory returns all commands including recent history
-func (a *App) getCommandsWithHistory() []models.Command {
-	// Start with built-in commands
-	commands := a.commandRegistry.GetAll()
+// getBuiltinCommands returns built-in commands with icons
+func (a *App) getBuiltinCommands() []models.Command {
+	cmds := a.commandRegistry.GetAll()
+	// Ensure commands have icons
+	for i := range cmds {
+		if cmds[i].Icon == "" {
+			cmds[i].Icon = "▸"
+		}
+	}
+	return cmds
+}
 
-	// Add recent history entries
-	if a.historyStore != nil {
-		entries, err := a.historyStore.GetRecent(10)
-		if err == nil {
-			for _, entry := range entries {
-				// Truncate long queries for display
-				displayQuery := entry.Query
-				if len(displayQuery) > 60 {
-					displayQuery = displayQuery[:57] + "..."
-				}
+// getTableCommands returns tables and views as commands
+func (a *App) getTableCommands() []models.Command {
+	var cmds []models.Command
 
-				// Create command from history entry
-				cmd := models.Command{
-					Type:        models.CommandTypeHistory,
-					Label:       displayQuery,
-					Description: fmt.Sprintf("From %s • %s", entry.DatabaseName, entry.ExecutedAt.Format("Jan 2 15:04")),
-					Icon:        "📜",
-					Tags:        []string{"history", entry.DatabaseName},
-					Action: func(sql string) tea.Cmd {
-						return func() tea.Msg {
-							return components.ExecuteQueryMsg{SQL: sql}
-						}
-					}(entry.Query), // Capture the query in closure
+	if a.treeView.Root == nil {
+		return cmds
+	}
+
+	// Traverse tree to find all tables and views
+	var traverse func(node *models.TreeNode)
+	traverse = func(node *models.TreeNode) {
+		if node == nil {
+			return
+		}
+
+		if node.Type == models.TreeNodeTypeTable || node.Type == models.TreeNodeTypeView {
+			// Get schema name from parent chain
+			var schemaName string
+			parent := node.Parent
+			for parent != nil {
+				if parent.Type == models.TreeNodeTypeSchema {
+					schemaName = strings.Split(parent.Label, " ")[0]
+					break
 				}
-				commands = append(commands, cmd)
+				parent = parent.Parent
 			}
+			if schemaName != "" {
+				icon := "▦"
+				prefix := "table:"
+				if node.Type == models.TreeNodeTypeView {
+					icon = "◎"
+					prefix = "view:"
+				}
+				cmds = append(cmds, models.Command{
+					ID:          fmt.Sprintf("%s%s.%s", prefix, schemaName, node.Label),
+					Label:       fmt.Sprintf("%s.%s", schemaName, node.Label),
+					Description: "",
+					Icon:        icon,
+					Tags:        []string{schemaName, node.Label},
+				})
+			}
+		}
+
+		for _, child := range node.Children {
+			traverse(child)
 		}
 	}
 
-	return commands
+	traverse(a.treeView.Root)
+	return cmds
+}
+
+// getHistoryCommands returns query history as commands
+func (a *App) getHistoryCommands() []models.Command {
+	var cmds []models.Command
+
+	if a.historyStore == nil {
+		return cmds
+	}
+
+	entries, err := a.historyStore.GetRecent(20)
+	if err != nil {
+		return cmds
+	}
+
+	for _, entry := range entries {
+		// Truncate long queries for display
+		displayQuery := entry.Query
+		if len(displayQuery) > 60 {
+			displayQuery = displayQuery[:57] + "..."
+		}
+
+		cmds = append(cmds, models.Command{
+			ID:          fmt.Sprintf("history:%d", entry.ID),
+			Type:        models.CommandTypeHistory,
+			Label:       displayQuery,
+			Description: fmt.Sprintf("From %s • %s", entry.DatabaseName, entry.ExecutedAt.Format("Jan 2 15:04")),
+			Icon:        "📜",
+			Tags:        []string{"history", entry.DatabaseName},
+			Action: func(sql string) tea.Cmd {
+				return func() tea.Msg {
+					return components.ExecuteQueryMsg{SQL: sql}
+				}
+			}(entry.Query),
+		})
+	}
+
+	return cmds
 }
 
 // handleCommandPalette handles key events when command palette is visible
@@ -1937,7 +1960,6 @@ func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Check if we got a close message
 	if msg.String() == "esc" || msg.String() == "ctrl+c" {
 		a.showCommandPalette = false
-		a.showTableJump = false
 		return a, nil
 	}
 
@@ -1945,28 +1967,47 @@ func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "enter" {
 		a.showCommandPalette = false
 
-		// Handle table jump mode
-		if a.showTableJump {
-			a.showTableJump = false
-			selected := a.commandPalette.GetSelectedCommand()
-			if selected != nil && strings.HasPrefix(selected.ID, "table:") {
-				// Parse schema.table from ID
-				parts := strings.SplitN(strings.TrimPrefix(selected.ID, "table:"), ".", 2)
-				if len(parts) == 2 {
-					schema := parts[0]
-					table := parts[1]
-					a.currentTable = schema + "." + table
+		selected := a.commandPalette.GetSelectedCommand()
+		if selected == nil {
+			return a, nil
+		}
 
-					return a, func() tea.Msg {
-						return LoadTableDataMsg{
-							Schema: schema,
-							Table:  table,
-							Offset: 0,
-							Limit:  100,
-						}
+		// Handle table/view selection (ID starts with "table:" or "view:")
+		if strings.HasPrefix(selected.ID, "table:") || strings.HasPrefix(selected.ID, "view:") {
+			// Parse schema.table from ID (format: "table:schema.name" or "view:schema.name")
+			var prefix string
+			if strings.HasPrefix(selected.ID, "table:") {
+				prefix = "table:"
+			} else {
+				prefix = "view:"
+			}
+			parts := strings.SplitN(strings.TrimPrefix(selected.ID, prefix), ".", 2)
+			if len(parts) == 2 {
+				schema := parts[0]
+				table := parts[1]
+				a.currentTable = schema + "." + table
+
+				// Sync tree view position - find the node and expand ancestors
+				if a.state.ActiveConnection != nil {
+					dbName := a.state.ActiveConnection.Config.Database
+					nodeID := fmt.Sprintf("%s%s.%s.%s", prefix, dbName, schema, table)
+					a.treeView.ExpandAndNavigateToNode(nodeID)
+				}
+
+				return a, func() tea.Msg {
+					return LoadTableDataMsg{
+						Schema: schema,
+						Table:  table,
+						Offset: 0,
+						Limit:  100,
 					}
 				}
 			}
+		}
+
+		// Handle regular command with action
+		if selected.Action != nil {
+			return a, selected.Action
 		}
 	}
 
@@ -2188,48 +2229,6 @@ func (a *App) loadTree() tea.Msg {
 	return TreeLoadedMsg{Root: root}
 }
 
-// buildTableJumpList builds the list of tables/views for Ctrl+T jump
-func (a *App) buildTableJumpList() {
-	a.tableJumpList = nil
-
-	if a.treeView.Root == nil {
-		return
-	}
-
-	// Traverse tree to find all tables and views
-	var traverse func(node *models.TreeNode)
-	traverse = func(node *models.TreeNode) {
-		if node == nil {
-			return
-		}
-
-		if node.Type == models.TreeNodeTypeTable || node.Type == models.TreeNodeTypeView {
-			// Get schema name from parent chain
-			var schemaName string
-			parent := node.Parent
-			for parent != nil {
-				if parent.Type == models.TreeNodeTypeSchema {
-					schemaName = strings.Split(parent.Label, " ")[0]
-					break
-				}
-				parent = parent.Parent
-			}
-			if schemaName != "" {
-				a.tableJumpList = append(a.tableJumpList, tableJumpItem{
-					Schema: schemaName,
-					Name:   node.Label,
-					IsView: node.Type == models.TreeNodeTypeView,
-				})
-			}
-		}
-
-		for _, child := range node.Children {
-			traverse(child)
-		}
-	}
-
-	traverse(a.treeView.Root)
-}
 
 // loadTableData loads table data with pagination
 func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
@@ -2337,6 +2336,45 @@ func (a *App) ShowError(title, message string) {
 // DismissError hides the error overlay
 func (a *App) DismissError() {
 	a.showError = false
+}
+
+// overlayCommandPalette renders the command palette as an overlay on top of background
+func (a *App) overlayCommandPalette(background string) string {
+	paletteView := a.commandPalette.View()
+	paletteLines := strings.Split(paletteView, "\n")
+	bgLines := strings.Split(background, "\n")
+
+	// Calculate center position
+	paletteHeight := len(paletteLines)
+	paletteWidth := lipgloss.Width(paletteLines[0]) // Use first line width
+
+	startY := (a.state.Height - paletteHeight) / 2
+	startX := (a.state.Width - paletteWidth) / 2
+
+	if startY < 0 {
+		startY = 0
+	}
+	if startX < 0 {
+		startX = 0
+	}
+
+	// Overlay palette on background
+	result := make([]string, len(bgLines))
+	for i, bgLine := range bgLines {
+		if i >= startY && i < startY+paletteHeight {
+			paletteLineIdx := i - startY
+			if paletteLineIdx < len(paletteLines) {
+				// Overlay this palette line onto background
+				result[i] = a.overlayLine(bgLine, paletteLines[paletteLineIdx], startX)
+			} else {
+				result[i] = bgLine
+			}
+		} else {
+			result[i] = bgLine
+		}
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // overlaySearchInput renders the search input as an overlay on top of background

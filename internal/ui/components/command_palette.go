@@ -14,29 +14,51 @@ import (
 // CloseCommandPaletteMsg is sent when the command palette should close
 type CloseCommandPaletteMsg struct{}
 
-// CommandPalette provides fuzzy search over commands
+// PaletteMode represents the current mode of the command palette
+type PaletteMode int
+
+const (
+	PaletteModeDefault  PaletteMode = iota // Commands + Tables/Views
+	PaletteModeCommands                    // Only commands (> prefix)
+	PaletteModeTables                      // Only tables/views (@ prefix)
+	PaletteModeHistory                     // Only history (# prefix)
+)
+
+// CommandPalette provides fuzzy search over commands, tables, and history
 type CommandPalette struct {
 	Input    string
-	Commands []models.Command
+	Query    string // The actual search query (without prefix)
+	Mode     PaletteMode
+
+	// Data sources
+	Commands []models.Command // Built-in commands
+	Tables   []models.Command // Tables and views
+	History  []models.Command // Query history
+
+	// Filtered results
 	Filtered []models.Command
 	Selected int
-	Width    int
-	Height   int
-	Theme    theme.Theme
-	Mode     string // "", ">", "?", "@", "#"
+
+	// Dimensions
+	Width  int
+	Height int
+	Theme  theme.Theme
 }
 
 // NewCommandPalette creates a new command palette
 func NewCommandPalette(th theme.Theme) *CommandPalette {
 	return &CommandPalette{
 		Input:    "",
+		Query:    "",
+		Mode:     PaletteModeDefault,
 		Commands: []models.Command{},
+		Tables:   []models.Command{},
+		History:  []models.Command{},
 		Filtered: []models.Command{},
 		Selected: 0,
 		Width:    80,
 		Height:   20,
 		Theme:    th,
-		Mode:     "",
 	}
 }
 
@@ -44,6 +66,51 @@ func NewCommandPalette(th theme.Theme) *CommandPalette {
 func (cp *CommandPalette) SetCommands(commands []models.Command) {
 	cp.Commands = commands
 	cp.Filter()
+}
+
+// SetTables updates the available tables/views
+func (cp *CommandPalette) SetTables(tables []models.Command) {
+	cp.Tables = tables
+	cp.Filter()
+}
+
+// SetHistory updates the query history
+func (cp *CommandPalette) SetHistory(history []models.Command) {
+	cp.History = history
+	cp.Filter()
+}
+
+// Reset clears the input and resets the palette state
+func (cp *CommandPalette) Reset() {
+	cp.Input = ""
+	cp.Query = ""
+	cp.Mode = PaletteModeDefault
+	cp.Selected = 0
+	cp.Filter()
+}
+
+// parseInput parses the input to detect mode prefix and extract query
+func (cp *CommandPalette) parseInput() {
+	if len(cp.Input) == 0 {
+		cp.Mode = PaletteModeDefault
+		cp.Query = ""
+		return
+	}
+
+	switch cp.Input[0] {
+	case '>':
+		cp.Mode = PaletteModeCommands
+		cp.Query = strings.TrimSpace(cp.Input[1:])
+	case '@':
+		cp.Mode = PaletteModeTables
+		cp.Query = strings.TrimSpace(cp.Input[1:])
+	case '#':
+		cp.Mode = PaletteModeHistory
+		cp.Query = strings.TrimSpace(cp.Input[1:])
+	default:
+		cp.Mode = PaletteModeDefault
+		cp.Query = cp.Input
+	}
 }
 
 // Update handles keyboard input for the command palette
@@ -84,6 +151,7 @@ func (cp *CommandPalette) Update(msg tea.KeyMsg) (*CommandPalette, tea.Cmd) {
 	case "backspace":
 		if len(cp.Input) > 0 {
 			cp.Input = cp.Input[:len(cp.Input)-1]
+			cp.parseInput()
 			cp.Filter()
 		}
 		return cp, nil
@@ -93,56 +161,79 @@ func (cp *CommandPalette) Update(msg tea.KeyMsg) (*CommandPalette, tea.Cmd) {
 		// Only accept single printable characters
 		if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
 			cp.Input += key
+			cp.parseInput()
 			cp.Filter()
 		}
 		return cp, nil
 	}
 }
 
-// Filter filters commands based on input and updates the filtered list
+// Filter filters commands based on input and mode, updates the filtered list
 func (cp *CommandPalette) Filter() {
-	if cp.Input == "" {
-		cp.Filtered = cp.Commands
+	// Determine which data sources to search based on mode
+	var sources [][]models.Command
+
+	switch cp.Mode {
+	case PaletteModeCommands:
+		sources = [][]models.Command{cp.Commands}
+	case PaletteModeTables:
+		sources = [][]models.Command{cp.Tables}
+	case PaletteModeHistory:
+		sources = [][]models.Command{cp.History}
+	default: // PaletteModeDefault - Commands + Tables
+		sources = [][]models.Command{cp.Commands, cp.Tables}
+	}
+
+	// If no query, show all items from selected sources
+	if cp.Query == "" {
+		var all []models.Command
+		for _, source := range sources {
+			all = append(all, source...)
+		}
+		cp.Filtered = all
 		cp.Selected = 0
 		return
 	}
 
 	filtered := []models.Command{}
 
-	for _, cmd := range cp.Commands {
-		// Try fuzzy matching on label first
-		matchLabel := search.FuzzyMatch(cp.Input, cmd.Label)
-		matchDesc := search.FuzzyMatch(cp.Input, cmd.Description)
+	for _, source := range sources {
+		for _, cmd := range source {
+			// Try fuzzy matching on label first
+			matchLabel := search.FuzzyMatch(cp.Query, cmd.Label)
+			matchDesc := search.FuzzyMatch(cp.Query, cmd.Description)
 
-		// Check tags
-		var matchTag search.Match
-		for _, tag := range cmd.Tags {
-			tagMatch := search.FuzzyMatch(cp.Input, tag)
-			if tagMatch.Matched && tagMatch.Score > matchTag.Score {
-				matchTag = tagMatch
+			// Check tags
+			var matchTag search.Match
+			for _, tag := range cmd.Tags {
+				tagMatch := search.FuzzyMatch(cp.Query, tag)
+				if tagMatch.Matched && tagMatch.Score > matchTag.Score {
+					matchTag = tagMatch
+				}
 			}
-		}
 
-		// Use best match
-		bestScore := 0
-		matched := false
+			// Use best match
+			bestScore := 0
+			matched := false
 
-		if matchLabel.Matched {
-			bestScore = matchLabel.Score + 50 // Bonus for label match
-			matched = true
-		}
-		if matchDesc.Matched && matchDesc.Score > bestScore {
-			bestScore = matchDesc.Score + 25 // Bonus for description match
-			matched = true
-		}
-		if matchTag.Matched && matchTag.Score > bestScore {
-			bestScore = matchTag.Score + 10 // Bonus for tag match
-			matched = true
-		}
+			if matchLabel.Matched {
+				bestScore = matchLabel.Score + 50 // Bonus for label match
+				matched = true
+			}
+			if matchDesc.Matched && matchDesc.Score > bestScore {
+				bestScore = matchDesc.Score + 25 // Bonus for description match
+				matched = true
+			}
+			if matchTag.Matched && matchTag.Score > bestScore {
+				bestScore = matchTag.Score + 10 // Bonus for tag match
+				matched = true
+			}
 
-		if matched {
-			cmd.Score = bestScore
-			filtered = append(filtered, cmd)
+			if matched {
+				cmdCopy := cmd
+				cmdCopy.Score = bestScore
+				filtered = append(filtered, cmdCopy)
+			}
 		}
 	}
 
@@ -163,6 +254,34 @@ func (cp *CommandPalette) GetSelectedCommand() *models.Command {
 	return nil
 }
 
+// getPlaceholder returns the placeholder text based on current mode
+func (cp *CommandPalette) getPlaceholder() string {
+	switch cp.Mode {
+	case PaletteModeCommands:
+		return "Search commands..."
+	case PaletteModeTables:
+		return "Search tables and views..."
+	case PaletteModeHistory:
+		return "Search query history..."
+	default:
+		return "Search commands and tables..."
+	}
+}
+
+// getModePrefix returns the display prefix for the current mode
+func (cp *CommandPalette) getModePrefix() string {
+	switch cp.Mode {
+	case PaletteModeCommands:
+		return "> "
+	case PaletteModeTables:
+		return "@ "
+	case PaletteModeHistory:
+		return "# "
+	default:
+		return ""
+	}
+}
+
 // View renders the command palette
 func (cp *CommandPalette) View() string {
 	// Input box
@@ -172,16 +291,33 @@ func (cp *CommandPalette) View() string {
 		Padding(0, 1).
 		Width(cp.Width - 4)
 
-	prefix := lipgloss.NewStyle().
-		Foreground(cp.Theme.BorderFocused).
-		Bold(true).
-		Render("> ")
-
 	cursor := lipgloss.NewStyle().
 		Foreground(cp.Theme.Cursor).
 		Render("█")
 
-	input := inputStyle.Render(prefix + cp.Input + cursor)
+	// Build input display
+	var inputContent string
+	if cp.Input == "" {
+		// Show placeholder
+		placeholder := lipgloss.NewStyle().
+			Foreground(cp.Theme.Comment).
+			Render(cp.getPlaceholder())
+		inputContent = placeholder + cursor
+	} else {
+		// Show prefix in color if present
+		prefix := cp.getModePrefix()
+		if prefix != "" {
+			prefixStyled := lipgloss.NewStyle().
+				Foreground(cp.Theme.BorderFocused).
+				Bold(true).
+				Render(prefix)
+			inputContent = prefixStyled + cp.Query + cursor
+		} else {
+			inputContent = cp.Input + cursor
+		}
+	}
+
+	input := inputStyle.Render(inputContent)
 
 	// Separator
 	separator := lipgloss.NewStyle().
@@ -230,11 +366,44 @@ func (cp *CommandPalette) View() string {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(cp.Theme.Comment).
 			Italic(true).
-			Padding(2, 0).
+			Padding(0, 1).
 			Width(cp.Width - 4).
 			Align(lipgloss.Center)
-		results = append(results, emptyStyle.Render("No commands found"))
+		results = append(results, emptyStyle.Render("No results found"))
 	}
+
+	// Pad results to fixed height to prevent layout jumping
+	emptyLineStyle := lipgloss.NewStyle().
+		Width(cp.Width - 4).
+		Padding(0, 1)
+	for len(results) < maxResults {
+		results = append(results, emptyLineStyle.Render(""))
+	}
+
+	// Mode hints at bottom
+	hintStyle := lipgloss.NewStyle().
+		Foreground(cp.Theme.Comment).
+		Width(cp.Width - 4)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(cp.Theme.BorderFocused).
+		Bold(true)
+
+	sepStyle := lipgloss.NewStyle().
+		Foreground(cp.Theme.Border)
+
+	hints := keyStyle.Render(">") + hintStyle.Render("cmd") +
+		sepStyle.Render("  ") +
+		keyStyle.Render("@") + hintStyle.Render("table") +
+		sepStyle.Render("  ") +
+		keyStyle.Render("#") + hintStyle.Render("history")
+
+	hintLine := hintStyle.Render(hints)
+
+	// Bottom separator
+	bottomSeparator := lipgloss.NewStyle().
+		Foreground(cp.Theme.Border).
+		Render(strings.Repeat("─", cp.Width-4))
 
 	// Combine
 	content := lipgloss.JoinVertical(
@@ -242,6 +411,8 @@ func (cp *CommandPalette) View() string {
 		input,
 		separator,
 		lipgloss.JoinVertical(lipgloss.Left, results...),
+		bottomSeparator,
+		hintLine,
 	)
 
 	// Box
