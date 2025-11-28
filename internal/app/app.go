@@ -943,6 +943,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					return a, nil
+				case "r":
+					// Reverse sort direction
+					if a.tableView.ReverseSortDirection() {
+						// Reload data with reversed sort
+						if a.currentTable != "" {
+							parts := strings.Split(a.currentTable, ".")
+							if len(parts) == 2 {
+								return a, func() tea.Msg {
+									return LoadTableDataMsg{
+										Schema:     parts[0],
+										Table:      parts[1],
+										Offset:     0,
+										Limit:      100,
+										SortColumn: a.tableView.GetSortColumn(),
+										SortDir:    a.tableView.GetSortDirection(),
+										NullsFirst: a.tableView.GetNullsFirst(),
+									}
+								}
+							}
+						}
+					}
+					return a, nil
 				case "J":
 					// Open JSONB viewer if cell contains JSONB (uppercase J to avoid conflict with vim down)
 					selectedRow, selectedCol := a.tableView.GetSelectedCell()

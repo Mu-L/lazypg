@@ -725,6 +725,20 @@ func (tv *TableView) GetNullsFirst() bool {
 	return tv.NullsFirst
 }
 
+// ReverseSortDirection reverses the current sort direction
+// Returns true if there was an active sort to reverse
+func (tv *TableView) ReverseSortDirection() bool {
+	if tv.SortColumn < 0 {
+		return false
+	}
+	if tv.SortDirection == "ASC" {
+		tv.SortDirection = "DESC"
+	} else {
+		tv.SortDirection = "ASC"
+	}
+	return true
+}
+
 // ClearSort clears the current sort
 func (tv *TableView) ClearSort() {
 	tv.SortColumn = -1
