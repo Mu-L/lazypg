@@ -659,9 +659,60 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
+		// If SQL editor is focused and expanded, route input there
+		if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+			// Handle escape to unfocus
+			if msg.String() == "esc" {
+				a.sqlEditorFocused = false
+				a.sqlEditor.Collapse()
+				a.state.FocusedPanel = models.RightPanel
+				a.updatePanelStyles()
+				return a, nil
+			}
+
+			// Handle ctrl+e to collapse
+			if msg.String() == "ctrl+e" {
+				a.sqlEditor.Collapse()
+				a.sqlEditorFocused = false
+				return a, nil
+			}
+
+			// Route to SQL editor
+			_, cmd := a.sqlEditor.Update(msg)
+			return a, cmd
+		}
+
 		switch msg.String() {
+		// Ctrl+E to toggle SQL editor expand/collapse
+		case "ctrl+e":
+			a.sqlEditor.Toggle()
+			if a.sqlEditor.IsExpanded() {
+				a.sqlEditorFocused = true
+			}
+			return a, nil
+
+		// Ctrl+Shift+Up to increase editor height preset
+		case "ctrl+shift+up":
+			if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+				a.sqlEditor.IncreaseHeight()
+			}
+			return a, nil
+
+		// Ctrl+Shift+Down to decrease editor height preset
+		case "ctrl+shift+down":
+			if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+				a.sqlEditor.DecreaseHeight()
+			}
+			return a, nil
+
 		// Tab switching with [ and ] (like lazygit)
 		case "[":
+			// Previous result tab (when not in SQL editor)
+			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
+				a.resultTabs.PrevTab()
+				return a, nil
+			}
+			// Structure view tab switching (existing behavior)
 			if a.currentTab > 0 {
 				a.currentTab--
 				a.structureView.SwitchTab(a.currentTab)
@@ -669,6 +720,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "]":
+			// Next result tab (when not in SQL editor)
+			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
+				a.resultTabs.NextTab()
+				return a, nil
+			}
+			// Structure view tab switching (existing behavior)
 			if a.currentTab < 3 {
 				a.currentTab++
 				a.structureView.SwitchTab(a.currentTab)
@@ -835,10 +892,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
-				if a.state.FocusedPanel == models.LeftPanel {
+				if a.sqlEditorFocused {
+					// From SQL editor to sidebar
+					a.sqlEditorFocused = false
+					a.state.FocusedPanel = models.LeftPanel
+				} else if a.state.FocusedPanel == models.LeftPanel {
+					// From sidebar to data panel
 					a.state.FocusedPanel = models.RightPanel
 				} else {
-					a.state.FocusedPanel = models.LeftPanel
+					// From data panel to SQL editor (if expanded) or sidebar
+					if a.sqlEditor.IsExpanded() {
+						a.sqlEditorFocused = true
+					} else {
+						a.state.FocusedPanel = models.LeftPanel
+					}
 				}
 				a.updatePanelStyles()
 			}
