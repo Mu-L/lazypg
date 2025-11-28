@@ -2,7 +2,9 @@ package components
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -47,6 +49,15 @@ type TableView struct {
 
 	// Preview pane for truncated content
 	PreviewPane *PreviewPane
+
+	// Line number display
+	ShowLineNumbers bool // Whether to show line numbers (default true)
+	RelativeNumbers bool // Whether to use relative line numbers (default false)
+
+	// Vim motion state
+	PendingCount     string    // Number prefix buffer (e.g., "42")
+	PendingCountTime time.Time // Last input time for timeout
+	PendingG         bool      // Waiting for second 'g' in 'gg'
 }
 
 // MatchPos represents a search match position
@@ -58,14 +69,16 @@ type MatchPos struct {
 // NewTableView creates a new table view with theme
 func NewTableView(th theme.Theme) *TableView {
 	return &TableView{
-		Columns:       []string{},
-		Rows:          [][]string{},
-		ColumnWidths:  []int{},
-		Theme:         th,
-		SortColumn:    -1,
-		SortDirection: "ASC",
-		NullsFirst:    false,
-		PreviewPane:   NewPreviewPane(th),
+		Columns:         []string{},
+		Rows:            [][]string{},
+		ColumnWidths:    []int{},
+		Theme:           th,
+		SortColumn:      -1,
+		SortDirection:   "ASC",
+		NullsFirst:      false,
+		PreviewPane:     NewPreviewPane(th),
+		ShowLineNumbers: true,  // Default to showing line numbers
+		RelativeNumbers: false, // Default to absolute line numbers
 	}
 }
 
@@ -75,6 +88,86 @@ func (tv *TableView) SetData(columns []string, rows [][]string, totalRows int) {
 	tv.Rows = rows
 	tv.TotalRows = totalRows
 	tv.calculateColumnWidths()
+}
+
+// getLineNumberWidth returns the width needed for line number column
+func (tv *TableView) getLineNumberWidth() int {
+	if !tv.ShowLineNumbers {
+		return 0
+	}
+	// Calculate digits needed for max row number
+	maxRow := tv.TotalRows
+	if maxRow < len(tv.Rows) {
+		maxRow = len(tv.Rows)
+	}
+	if maxRow == 0 {
+		maxRow = 1
+	}
+	digits := len(fmt.Sprintf("%d", maxRow))
+	if digits < 2 {
+		digits = 2 // Minimum 2 digits
+	}
+	// Width = digits + 1 space + separator "│ "
+	return digits + 3
+}
+
+// renderLineNumber renders the line number for a row
+func (tv *TableView) renderLineNumber(rowIndex int, isSelected bool) string {
+	if !tv.ShowLineNumbers {
+		return ""
+	}
+
+	// Calculate the display number
+	var displayNum int
+	if tv.RelativeNumbers && !isSelected {
+		// Relative mode: show distance from selected row
+		displayNum = rowIndex - tv.SelectedRow
+		if displayNum < 0 {
+			displayNum = -displayNum
+		}
+	} else {
+		// Absolute mode or selected row in relative mode
+		displayNum = rowIndex + 1 // 1-indexed
+	}
+
+	// Calculate width for formatting
+	maxRow := tv.TotalRows
+	if maxRow < len(tv.Rows) {
+		maxRow = len(tv.Rows)
+	}
+	if maxRow == 0 {
+		maxRow = 1
+	}
+	digits := len(fmt.Sprintf("%d", maxRow))
+	if digits < 2 {
+		digits = 2
+	}
+
+	// Format the number right-aligned
+	numStr := fmt.Sprintf("%*d", digits, displayNum)
+
+	// Style based on selection
+	var style lipgloss.Style
+	if isSelected {
+		// Current line: highlighted
+		style = lipgloss.NewStyle().
+			Foreground(tv.Theme.Info).
+			Bold(true)
+	} else {
+		// Other lines: dimmed
+		style = lipgloss.NewStyle().
+			Foreground(tv.Theme.Metadata)
+	}
+
+	// Separator style
+	sepStyle := lipgloss.NewStyle().Foreground(tv.Theme.Border)
+
+	return style.Render(numStr) + sepStyle.Render(" │ ")
+}
+
+// ToggleRelativeNumbers toggles between absolute and relative line numbers
+func (tv *TableView) ToggleRelativeNumbers() {
+	tv.RelativeNumbers = !tv.RelativeNumbers
 }
 
 // calculateColumnWidths calculates optimal column widths
@@ -128,8 +221,8 @@ func (tv *TableView) calculateVisibleCols() {
 		return
 	}
 
-	// Reserve space for edge indicators (2 chars each side)
-	availableWidth := tv.Width - 4
+	// Reserve space for edge indicators (2 chars each side) and line numbers
+	availableWidth := tv.Width - 4 - tv.getLineNumberWidth()
 
 	// Count columns that fit starting from LeftColOffset
 	totalWidth := 0
@@ -175,16 +268,38 @@ func (tv *TableView) View() string {
 		rightIndicator = " ▶"
 	}
 
-	// Render header with indicators
-	b.WriteString(leftIndicator)
+	// Get line number column width
+	lineNumWidth := tv.getLineNumberWidth()
+
+	// Render header with line number column styled to match header background
+	headerBgStyle := lipgloss.NewStyle().Background(tv.Theme.Selection)
+	if tv.ShowLineNumbers {
+		// Create header-styled line number placeholder
+		headerLineNumStyle := lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Metadata)
+		// Use "#" as header for line number column
+		numColWidth := lineNumWidth - 3 // subtract " │ "
+		headerLineNum := fmt.Sprintf("%*s", numColWidth, "#")
+		sepStyle := lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Border)
+		b.WriteString(headerLineNumStyle.Render(headerLineNum))
+		b.WriteString(sepStyle.Render(" │ "))
+	}
+	// Left indicator with header background
+	b.WriteString(headerBgStyle.Render(leftIndicator))
 	b.WriteString(tv.renderHeader())
-	b.WriteString(rightIndicator)
+	b.WriteString(headerBgStyle.Render(rightIndicator))
 	b.WriteString("\n")
 
-	// Render separator
-	b.WriteString("  ") // Align with left indicator
+	// Render separator (extend through line number column)
+	sepStyle := lipgloss.NewStyle().Foreground(tv.Theme.Border)
+	lineNumSep := strings.Repeat("─", lineNumWidth)
+	b.WriteString(sepStyle.Render(lineNumSep))
+	b.WriteString(sepStyle.Render("──")) // Align with left indicator
 	b.WriteString(tv.renderSeparator())
-	b.WriteString("  ")
+	b.WriteString(sepStyle.Render("──"))
 	b.WriteString("\n")
 
 	// Calculate how many rows we can show
@@ -203,6 +318,8 @@ func (tv *TableView) View() string {
 
 	for i := tv.TopRow; i < endRow; i++ {
 		isSelected := i == tv.SelectedRow
+		// Render line number
+		b.WriteString(tv.renderLineNumber(i, isSelected))
 		b.WriteString("  ") // Align with left indicator
 		b.WriteString(tv.renderRow(tv.Rows[i], isSelected, i))
 		b.WriteString("  ")
@@ -811,4 +928,190 @@ func (tv *TableView) GetPreviewPaneHeight() int {
 		return tv.PreviewPane.Height()
 	}
 	return 0
+}
+
+// === Vim Motion Support ===
+
+const vimMotionTimeout = 1500 * time.Millisecond
+
+// HandleVimMotion handles vim-style motion input
+// Returns true if the key was handled, false otherwise
+func (tv *TableView) HandleVimMotion(key string) bool {
+	now := time.Now()
+
+	// Check for timeout - clear pending state if too much time has passed
+	if tv.PendingCount != "" || tv.PendingG {
+		if now.Sub(tv.PendingCountTime) > vimMotionTimeout {
+			tv.ClearVimMotion()
+		}
+	}
+
+	// Handle number input (0-9)
+	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
+		// Special case: '0' at start means go to beginning (not a count prefix)
+		if key == "0" && tv.PendingCount == "" && !tv.PendingG {
+			return false // Let it be handled as regular key
+		}
+		tv.PendingCount += key
+		tv.PendingCountTime = now
+		tv.PendingG = false
+		return true
+	}
+
+	// Handle 'g' key (for 'gg')
+	if key == "g" {
+		if tv.PendingG {
+			// Second 'g' - execute gg (go to first line)
+			tv.ExecuteJump(0, "gg")
+			return true
+		}
+		// First 'g' - wait for second
+		tv.PendingG = true
+		tv.PendingCountTime = now
+		return true
+	}
+
+	// Handle 'G' key (go to line or last line)
+	if key == "G" {
+		count := tv.getPendingCount()
+		if count > 0 {
+			// {n}G - go to line n
+			tv.ExecuteJump(count, "G")
+		} else {
+			// G without count - go to last line
+			tv.ExecuteJump(0, "G")
+		}
+		return true
+	}
+
+	// Handle 'j' key (down)
+	if key == "j" {
+		count := tv.getPendingCount()
+		if count == 0 {
+			count = 1
+		}
+		tv.ExecuteJump(count, "j")
+		return true
+	}
+
+	// Handle 'k' key (up)
+	if key == "k" {
+		count := tv.getPendingCount()
+		if count == 0 {
+			count = 1
+		}
+		tv.ExecuteJump(count, "k")
+		return true
+	}
+
+	// Any other key clears pending state
+	if tv.PendingCount != "" || tv.PendingG {
+		tv.ClearVimMotion()
+	}
+
+	return false
+}
+
+// getPendingCount returns the pending count as int and clears it
+func (tv *TableView) getPendingCount() int {
+	if tv.PendingCount == "" {
+		tv.ClearVimMotion()
+		return 0
+	}
+	count, err := strconv.Atoi(tv.PendingCount)
+	if err != nil {
+		tv.ClearVimMotion()
+		return 0
+	}
+	tv.ClearVimMotion()
+	return count
+}
+
+// ClearVimMotion clears vim motion state
+func (tv *TableView) ClearVimMotion() {
+	tv.PendingCount = ""
+	tv.PendingG = false
+}
+
+// ExecuteJump executes a vim-style jump
+func (tv *TableView) ExecuteJump(count int, motion string) {
+	tv.ClearVimMotion()
+
+	maxRow := len(tv.Rows) - 1
+	if maxRow < 0 {
+		return
+	}
+
+	switch motion {
+	case "gg":
+		// Go to first line (or line N if count provided)
+		if count > 0 {
+			tv.SelectedRow = count - 1 // Convert to 0-indexed
+		} else {
+			tv.SelectedRow = 0
+		}
+
+	case "G":
+		// Go to last line (or line N if count provided)
+		if count > 0 {
+			tv.SelectedRow = count - 1 // Convert to 0-indexed
+		} else {
+			tv.SelectedRow = maxRow
+		}
+
+	case "j":
+		// Move down N lines
+		tv.SelectedRow += count
+
+	case "k":
+		// Move up N lines
+		tv.SelectedRow -= count
+	}
+
+	// Clamp to valid range
+	if tv.SelectedRow < 0 {
+		tv.SelectedRow = 0
+	}
+	if tv.SelectedRow > maxRow {
+		tv.SelectedRow = maxRow
+	}
+
+	// Adjust scroll to keep selected row visible
+	tv.ensureRowVisible()
+
+	// Update preview pane if visible
+	if tv.PreviewPane != nil && tv.PreviewPane.Visible {
+		tv.UpdatePreviewPane()
+	}
+}
+
+// ensureRowVisible adjusts TopRow to keep SelectedRow visible
+func (tv *TableView) ensureRowVisible() {
+	if tv.SelectedRow < tv.TopRow {
+		tv.TopRow = tv.SelectedRow
+	} else if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
+		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
+		if tv.TopRow < 0 {
+			tv.TopRow = 0
+		}
+	}
+}
+
+// GetVimMotionStatus returns the current vim motion state for status bar
+func (tv *TableView) GetVimMotionStatus() string {
+	if tv.PendingG {
+		if tv.PendingCount != "" {
+			return tv.PendingCount + "g_"
+		}
+		return "g_"
+	}
+	if tv.PendingCount != "" {
+		return tv.PendingCount + "_"
+	}
+	return ""
+}
+
+// HasPendingVimMotion returns true if there's pending vim motion input
+func (tv *TableView) HasPendingVimMotion() bool {
+	return tv.PendingCount != "" || tv.PendingG
 }

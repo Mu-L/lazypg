@@ -343,13 +343,12 @@ func (sv *StructureView) View() string {
 func (sv *StructureView) renderTabBar() string {
 	tabs := []struct {
 		index int
-		key   string
 		label string
 	}{
-		{0, "1", "Data"},
-		{1, "2", "Columns"},
-		{2, "3", "Constraints"},
-		{3, "4", "Indexes"},
+		{0, "Data"},
+		{1, "Columns"},
+		{2, "Constraints"},
+		{3, "Indexes"},
 	}
 
 	var parts []string
@@ -370,16 +369,12 @@ func (sv *StructureView) renderTabBar() string {
 			tabContent := indicatorStyle.Render("▌") + tabStyle.Render(tab.label)
 			parts = append(parts, tabContent)
 		} else {
-			// Inactive tab with key hint
-			keyStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#585b70")). // Surface2
-				Faint(true)
-
+			// Inactive tab
 			tabStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6c7086")). // Overlay0
 				Padding(0, 1)
 
-			tabContent := keyStyle.Render(tab.key) + tabStyle.Render(tab.label)
+			tabContent := tabStyle.Render(tab.label)
 			parts = append(parts, tabContent)
 		}
 

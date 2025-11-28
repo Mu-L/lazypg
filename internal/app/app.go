@@ -651,35 +651,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		// Tab switching (1/2/3/4 when right panel focused, or Ctrl+1/2/3/4 globally)
-		case "1", "ctrl+1":
-			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+1" {
-				a.currentTab = 0
-				a.structureView.SwitchTab(0)
-				return a, nil
-			}
-
-		case "2", "ctrl+2":
-			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+2" {
-				a.currentTab = 1
-				a.structureView.SwitchTab(1)
-				return a, nil
-			}
-
-		case "3", "ctrl+3":
-			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+3" {
-				a.currentTab = 2
-				a.structureView.SwitchTab(2)
-				return a, nil
-			}
-
-		case "4", "ctrl+4":
-			if a.state.FocusedPanel == models.RightPanel || msg.String() == "ctrl+4" {
-				a.currentTab = 3
-				a.structureView.SwitchTab(3)
-				return a, nil
-			}
-
 		// Tab switching with [ and ] (like lazygit)
 		case "[":
 			if a.currentTab > 0 {
@@ -863,11 +834,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+				// Toggle relative line numbers
+				if msg.String() == "ctrl+n" {
+					a.tableView.ToggleRelativeNumbers()
+					return a, nil
+				}
+
+				// Handle Vim motion (number prefixes, g, G, etc.)
+				// This must come before individual key handling
+				if a.tableView.HandleVimMotion(msg.String()) {
+					return a, nil
+				}
+
 				switch msg.String() {
-				case "up", "k":
+				case "up":
 					a.tableView.MoveSelection(-1)
 					return a, nil
-				case "down", "j":
+				case "down":
 					a.tableView.MoveSelection(1)
 
 					// Check if we need to load more data (lazy loading)
@@ -1232,6 +1215,17 @@ func (a *App) renderNormalView() string {
 		filterIndicator := separatorStyle.Render(" │ ") +
 			filterStyle.Render("") + dimStyle.Render(fmt.Sprintf(" %d filter%s", filterCount, filterSuffix))
 		bottomBarLeft = bottomBarLeft + filterIndicator
+	}
+
+	// Add Vim motion status if pending
+	if a.state.FocusedPanel == models.RightPanel && a.currentTab == 0 {
+		vimStatus := a.tableView.GetVimMotionStatus()
+		if vimStatus != "" {
+			vimStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#a6e3a1")). // Green for vim input
+				Bold(true)
+			bottomBarLeft = bottomBarLeft + separatorStyle.Render(" │ ") + vimStyle.Render(vimStatus)
+		}
 	}
 
 	// Common keys on the right with icons
