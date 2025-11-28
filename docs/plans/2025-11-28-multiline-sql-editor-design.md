@@ -145,9 +145,11 @@ Replace the single-line QuickQuery with a full-featured multiline SQL editor. Th
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Enter` | Execute statement at cursor |
+| `Alt+Enter` | Execute statement at cursor |
 | `Ctrl+↑` | Previous history |
 | `Ctrl+↓` | Next history |
+
+> Note: `Ctrl+Enter` cannot be used because in terminals it produces the same key code as `Enter`.
 
 ### Tabs & Focus
 
@@ -160,7 +162,7 @@ Replace the single-line QuickQuery with a full-featured multiline SQL editor. Th
 ### Smart Focus
 
 - `Ctrl+E` expand → auto-focus Editor
-- `Ctrl+Enter` execute → auto-focus Data Panel
+- `Alt+Enter` execute → auto-focus Data Panel
 - Editor collapse → auto-focus Data Panel
 
 ## Implementation Impact

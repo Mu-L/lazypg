@@ -621,8 +621,8 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 	case "ctrl+down":
 		e.HistoryNext()
 
-	// Execute
-	case "ctrl+enter":
+	// Execute (Alt+Enter - note: ctrl+enter equals enter in terminal)
+	case "alt+enter":
 		sql := e.GetCurrentStatement()
 		if sql != "" {
 			e.AddToHistory(e.GetContent())
