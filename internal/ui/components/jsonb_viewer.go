@@ -8,7 +8,13 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneJSONBNodePrefix = "jsonb-node-"
 )
 
 // NodeType represents the type of a JSON node
@@ -75,11 +81,34 @@ type JSONBViewer struct {
 
 	// Preview pane for truncated string values
 	previewPane *PreviewPane
+
+	// Cached styles for performance
+	cachedStyles *jsonbViewerStyles
+}
+
+// jsonbViewerStyles holds pre-computed styles for JSONBViewer rendering
+type jsonbViewerStyles struct {
+	key           lipgloss.Style
+	metadata      lipgloss.Style
+	stringValue   lipgloss.Style
+	numberValue   lipgloss.Style
+	boolValue     lipgloss.Style
+	nullValue     lipgloss.Style
+	searchMatch   lipgloss.Style
+	selected      lipgloss.Style
+	searchResult  lipgloss.Style
+	title         lipgloss.Style
+	instructions  lipgloss.Style
+	noData        lipgloss.Style
+	container     lipgloss.Style
+	previewTitle  lipgloss.Style
+	previewHelp   lipgloss.Style
+	contentStyle  lipgloss.Style
 }
 
 // NewJSONBViewer creates a new tree-based JSONB viewer
 func NewJSONBViewer(th theme.Theme) *JSONBViewer {
-	return &JSONBViewer{
+	jv := &JSONBViewer{
 		Width:         80,
 		Height:        30,
 		Theme:         th,
@@ -87,6 +116,52 @@ func NewJSONBViewer(th theme.Theme) *JSONBViewer {
 		scrollOffset:  0,
 		marks:         make(map[rune]*TreeNode),
 		previewPane:   NewPreviewPane(th),
+	}
+	jv.initStyles()
+	return jv
+}
+
+// initStyles initializes cached styles for rendering performance
+func (jv *JSONBViewer) initStyles() {
+	jv.cachedStyles = &jsonbViewerStyles{
+		key: lipgloss.NewStyle().Foreground(jv.Theme.Info),
+		metadata: lipgloss.NewStyle().Foreground(jv.Theme.Metadata),
+		stringValue: lipgloss.NewStyle().Foreground(jv.Theme.Success),
+		numberValue: lipgloss.NewStyle().Foreground(jv.Theme.Warning),
+		boolValue: lipgloss.NewStyle().Foreground(jv.Theme.Error),
+		nullValue: lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Italic(true),
+		searchMatch: lipgloss.NewStyle().Foreground(jv.Theme.Warning),
+		selected: lipgloss.NewStyle().
+			Background(jv.Theme.BorderFocused).
+			Foreground(jv.Theme.Background).
+			Bold(true),
+		searchResult: lipgloss.NewStyle().
+			Background(jv.Theme.Selection).
+			Foreground(jv.Theme.Foreground),
+		title: lipgloss.NewStyle().
+			Foreground(jv.Theme.Background).
+			Background(jv.Theme.Info).
+			Padding(0, 1).
+			Bold(true),
+		instructions: lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Padding(0, 1),
+		noData: lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Italic(true),
+		container: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(jv.Theme.Border).
+			Padding(1),
+		previewTitle: lipgloss.NewStyle().
+			Foreground(jv.Theme.Info).
+			Bold(true),
+		previewHelp: lipgloss.NewStyle().
+			Foreground(jv.Theme.Metadata).
+			Italic(true),
+		contentStyle: lipgloss.NewStyle().Foreground(jv.Theme.Foreground),
 	}
 }
 
@@ -461,6 +536,107 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 	return jv, nil
 }
 
+// HandleMouseClick handles mouse click events
+// Returns true if click was handled, and a command if needed
+func (jv *JSONBViewer) HandleMouseClick(msg tea.MouseMsg) (handled bool, cmd tea.Cmd) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, nil
+	}
+
+	// Calculate visible range
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	endIndex := jv.scrollOffset + contentHeight
+	if endIndex > len(jv.visibleNodes) {
+		endIndex = len(jv.visibleNodes)
+	}
+
+	// Check each visible node zone
+	for i := jv.scrollOffset; i < endIndex; i++ {
+		zoneID := fmt.Sprintf("%s%d", ZoneJSONBNodePrefix, i)
+		if zone.Get(zoneID).InBounds(msg) {
+			// Click on already selected node toggles expand/collapse
+			if i == jv.selectedIndex {
+				node := jv.visibleNodes[jv.selectedIndex]
+				if node.Type == NodeObject || node.Type == NodeArray {
+					node.IsExpanded = !node.IsExpanded
+					jv.rebuildVisibleNodes()
+					// Keep selection within bounds
+					if jv.selectedIndex >= len(jv.visibleNodes) {
+						jv.selectedIndex = len(jv.visibleNodes) - 1
+					}
+					if jv.selectedIndex < 0 {
+						jv.selectedIndex = 0
+					}
+					jv.adjustScroll()
+				}
+			} else {
+				// First click selects
+				jv.selectedIndex = i
+				jv.adjustScroll()
+			}
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// HandleMouseWheel handles mouse wheel events for scrolling
+// Returns true if the event was handled
+func (jv *JSONBViewer) HandleMouseWheel(msg tea.MouseMsg) bool {
+	contentHeight := jv.Height - 5 // Account for header and footer
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		// Scroll viewport up (like lazygit)
+		jv.scrollOffset -= 3
+		if jv.scrollOffset < 0 {
+			jv.scrollOffset = 0
+		}
+		// Keep selection within visible range
+		if jv.selectedIndex >= jv.scrollOffset+contentHeight {
+			jv.selectedIndex = jv.scrollOffset + contentHeight - 1
+		}
+		if jv.selectedIndex < jv.scrollOffset {
+			jv.selectedIndex = jv.scrollOffset
+		}
+		return true
+	case tea.MouseButtonWheelDown:
+		// Scroll viewport down (like lazygit)
+		maxScrollOffset := len(jv.visibleNodes) - contentHeight
+		if maxScrollOffset < 0 {
+			maxScrollOffset = 0
+		}
+		jv.scrollOffset += 3
+		if jv.scrollOffset > maxScrollOffset {
+			jv.scrollOffset = maxScrollOffset
+		}
+		// Keep selection within visible range
+		if jv.selectedIndex < jv.scrollOffset {
+			jv.selectedIndex = jv.scrollOffset
+		}
+		if jv.selectedIndex >= jv.scrollOffset+contentHeight {
+			jv.selectedIndex = jv.scrollOffset + contentHeight - 1
+		}
+		// Bounds check
+		if jv.selectedIndex >= len(jv.visibleNodes) {
+			jv.selectedIndex = len(jv.visibleNodes) - 1
+		}
+		if jv.selectedIndex < 0 {
+			jv.selectedIndex = 0
+		}
+		return true
+	}
+	return false
+}
+
 // adjustScroll adjusts scroll offset to keep selected node visible
 func (jv *JSONBViewer) adjustScroll() {
 	contentHeight := jv.Height - 5 // Account for header and footer
@@ -694,27 +870,17 @@ func (jv *JSONBViewer) RenderPreviewPanel(width, height int) string {
 func (jv *JSONBViewer) renderMainPanel(width int) string {
 	var sections []string
 
-	// Title bar
-	titleStyle := lipgloss.NewStyle().
-		Foreground(jv.Theme.Background).
-		Background(jv.Theme.Info).
-		Padding(0, 1).
-		Bold(true)
-
+	// Title bar (use cached style)
 	title := " JSONB Tree Viewer"
-	sections = append(sections, titleStyle.Render(title))
+	sections = append(sections, jv.cachedStyles.title.Render(title))
 
-	// Instructions or search bar
-	instrStyle := lipgloss.NewStyle().
-		Foreground(jv.Theme.Metadata).
-		Padding(0, 1)
-
+	// Instructions or search bar (use cached style)
 	if jv.searchMode {
 		searchBar := fmt.Sprintf("Search: %s_", jv.searchQuery)
 		if len(jv.searchResults) > 0 {
 			searchBar += fmt.Sprintf("  (%d matches)", len(jv.searchResults))
 		}
-		sections = append(sections, instrStyle.Render(searchBar))
+		sections = append(sections, jv.cachedStyles.instructions.Render(searchBar))
 	} else if jv.quickJumpMode {
 		// Show mark/jump mode
 		var modeInfo string
@@ -723,16 +889,16 @@ func (jv *JSONBViewer) renderMainPanel(width int) string {
 		} else if jv.quickJumpBuffer == "'" {
 			modeInfo = "Jump mode: Press a-z to jump to mark"
 		}
-		sections = append(sections, instrStyle.Render(modeInfo))
+		sections = append(sections, jv.cachedStyles.instructions.Render(modeInfo))
 	} else if len(jv.searchResults) > 0 {
 		// Show search results navigation info
 		searchInfo := fmt.Sprintf("Search: \"%s\" (%d/%d)  n: Next  N: Prev  Esc: Clear",
 			jv.searchQuery, jv.currentMatchIndex+1, len(jv.searchResults))
-		sections = append(sections, instrStyle.Render(searchInfo))
+		sections = append(sections, jv.cachedStyles.instructions.Render(searchInfo))
 	} else {
 		// Show help text
 		instr := "↑↓/jk: Move  g/G: Top/Bottom  Ctrl-f/b: Page  JK: Sibling  p: Parent  ]/[: Jump Type  y: Copy Path  m/': Mark  /: Search  ?: Help"
-		sections = append(sections, instrStyle.Render(instr))
+		sections = append(sections, jv.cachedStyles.instructions.Render(instr))
 	}
 
 	// Content (tree view or help)
@@ -753,23 +919,14 @@ func (jv *JSONBViewer) renderMainPanel(width int) string {
 	statusBar := jv.renderStatus()
 	sections = append(sections, statusBar)
 
-	// Container style
-	containerStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(jv.Theme.Border).
-		Width(width - 2). // Account for border
-		Padding(1)
-
-	return containerStyle.Render(strings.Join(sections, "\n"))
+	// Container style (width needs to be dynamic)
+	return jv.cachedStyles.container.Width(width - 2).Render(strings.Join(sections, "\n"))
 }
 
 // renderTree renders the visible portion of the tree
 func (jv *JSONBViewer) renderTree(height int) string {
 	if len(jv.visibleNodes) == 0 {
-		return lipgloss.NewStyle().
-			Foreground(jv.Theme.Metadata).
-			Italic(true).
-			Render("No data")
+		return jv.cachedStyles.noData.Render("No data")
 	}
 
 	var lines []string
@@ -784,7 +941,9 @@ func (jv *JSONBViewer) renderTree(height int) string {
 		isSelected := i == jv.selectedIndex
 		isSearchMatch := jv.isSearchMatch(node)
 		line := jv.renderNode(node, isSelected, isSearchMatch)
-		lines = append(lines, line)
+		// Wrap with zone mark for mouse click
+		zoneID := fmt.Sprintf("%s%d", ZoneJSONBNodePrefix, i)
+		lines = append(lines, zone.Mark(zoneID, line))
 	}
 
 	return strings.Join(lines, "\n")
@@ -817,75 +976,53 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch
 		indicator = "  "
 	}
 
-	// Key with syntax highlighting
-	keyStyle := lipgloss.NewStyle().Foreground(jv.Theme.Info) // Blue for keys
-	keyPart := keyStyle.Render(node.Key)
+	// Key with syntax highlighting (use cached style)
+	keyPart := jv.cachedStyles.key.Render(node.Key)
 
-	// Value with syntax highlighting
+	// Value with syntax highlighting (use cached styles)
 	var valuePart string
 	switch node.Type {
 	case NodeObject:
 		count := len(node.Children)
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Metadata).
-			Render(fmt.Sprintf(" { %d properties }", count))
+		valuePart = jv.cachedStyles.metadata.Render(fmt.Sprintf(" { %d properties }", count))
 
 	case NodeArray:
 		count := len(node.Children)
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Metadata).
-			Render(fmt.Sprintf(" [ %d items ]", count))
+		valuePart = jv.cachedStyles.metadata.Render(fmt.Sprintf(" [ %d items ]", count))
 
 	case NodeString:
 		str := fmt.Sprintf("%v", node.Value)
 		if len(str) > 50 {
 			str = str[:47] + "..."
 		}
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Success). // Green for strings
-			Render(fmt.Sprintf(": \"%s\"", str))
+		valuePart = jv.cachedStyles.stringValue.Render(fmt.Sprintf(": \"%s\"", str))
 
 	case NodeNumber:
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Warning). // Yellow/orange for numbers
-			Render(fmt.Sprintf(": %v", node.Value))
+		valuePart = jv.cachedStyles.numberValue.Render(fmt.Sprintf(": %v", node.Value))
 
 	case NodeBoolean:
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Error). // Red for booleans
-			Render(fmt.Sprintf(": %v", node.Value))
+		valuePart = jv.cachedStyles.boolValue.Render(fmt.Sprintf(": %v", node.Value))
 
 	case NodeNull:
-		valuePart = lipgloss.NewStyle().
-			Foreground(jv.Theme.Metadata).
-			Italic(true).
-			Render(": null")
+		valuePart = jv.cachedStyles.nullValue.Render(": null")
 	}
 
 	// Add search match indicator (only if not selected)
 	var searchIndicator string
 	if isSearchMatch && !isSelected {
-		searchIndicator = lipgloss.NewStyle().
-			Foreground(jv.Theme.Warning).
-			Render(" 🔍")
+		searchIndicator = jv.cachedStyles.searchMatch.Render(" 🔍")
 	}
 
 	line := indent + indicator + keyPart + valuePart + searchIndicator
 
 	// Priority 1: Highlight selected row (most prominent)
 	if isSelected {
-		style := lipgloss.NewStyle().
-			Background(jv.Theme.BorderFocused). // Bright blue background
-			Foreground(jv.Theme.Background).    // Dark text for contrast
-			Bold(true).
-			Width(jv.Width - 6) // Account for container padding
+		// Width needs to be dynamic, so apply it to cached style
+		style := jv.cachedStyles.selected.Width(jv.Width - 6)
 
 		// If selected row is also a search match, add indicator
 		if isSearchMatch {
-			matchIndicator := lipgloss.NewStyle().
-				Foreground(jv.Theme.Warning).
-				Bold(true).
-				Render(" ⭐")
+			matchIndicator := jv.cachedStyles.searchMatch.Bold(true).Render(" ⭐")
 			return style.Render(line + matchIndicator)
 		}
 
@@ -894,11 +1031,7 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch
 
 	// Priority 2: Highlight search matches with subtle background (less prominent)
 	if isSearchMatch {
-		return lipgloss.NewStyle().
-			Background(jv.Theme.Selection). // Subtle gray background
-			Foreground(jv.Theme.Foreground).
-			Width(jv.Width - 6).
-			Render(line)
+		return jv.cachedStyles.searchResult.Width(jv.Width - 6).Render(line)
 	}
 
 	return line

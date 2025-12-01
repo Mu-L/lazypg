@@ -7,8 +7,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
+
+// Zone ID for SQL Editor mouse click handling
+const ZoneSQLEditor = "sql-editor"
 
 // SQLEditorHeightPreset defines the height presets for the editor
 type SQLEditorHeightPreset int
@@ -488,7 +492,8 @@ func (e *SQLEditor) View() string {
 	contentWidth := e.Width - containerStyle.GetHorizontalFrameSize()
 	containerStyle = containerStyle.Width(contentWidth)
 
-	return containerStyle.Render(content)
+	// Wrap entire editor with zone mark for click detection
+	return zone.Mark(ZoneSQLEditor, containerStyle.Render(content))
 }
 
 // renderLine renders a single line with line number and syntax highlighting

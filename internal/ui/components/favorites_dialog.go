@@ -6,8 +6,15 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneFavoriteItemPrefix = "fav-item-"
+	ZoneFavoriteFieldPrefix = "fav-field-"
 )
 
 // FavoritesMode represents the dialog mode
@@ -107,6 +114,109 @@ func (fd *FavoritesDialog) Update(msg tea.KeyMsg) (*FavoritesDialog, tea.Cmd) {
 		return fd.handleEditMode(msg)
 	}
 	return fd, nil
+}
+
+// HandleMouseWheel handles mouse wheel events for scrolling
+// Returns true if the event was handled
+func (fd *FavoritesDialog) HandleMouseWheel(msg tea.MouseMsg) bool {
+	if fd.mode != FavoritesModeList {
+		return false
+	}
+
+	visibleHeight := fd.Height - 10
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		// Scroll viewport up (like lazygit)
+		fd.deleteConfirmMode = false
+		fd.offset -= 3
+		if fd.offset < 0 {
+			fd.offset = 0
+		}
+		// Keep selection within visible range
+		if fd.selected >= fd.offset+visibleHeight {
+			fd.selected = fd.offset + visibleHeight - 1
+		}
+		if fd.selected < fd.offset {
+			fd.selected = fd.offset
+		}
+		return true
+	case tea.MouseButtonWheelDown:
+		// Scroll viewport down (like lazygit)
+		fd.deleteConfirmMode = false
+		maxOffset := len(fd.favorites) - visibleHeight
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		fd.offset += 3
+		if fd.offset > maxOffset {
+			fd.offset = maxOffset
+		}
+		// Keep selection within visible range
+		if fd.selected < fd.offset {
+			fd.selected = fd.offset
+		}
+		if fd.selected >= fd.offset+visibleHeight {
+			fd.selected = fd.offset + visibleHeight - 1
+		}
+		// Bounds check
+		if fd.selected >= len(fd.favorites) {
+			fd.selected = len(fd.favorites) - 1
+		}
+		if fd.selected < 0 {
+			fd.selected = 0
+		}
+		return true
+	}
+	return false
+}
+
+// HandleMouseClick handles mouse click events
+// Returns true if click was handled, and a command if needed
+func (fd *FavoritesDialog) HandleMouseClick(msg tea.MouseMsg) (handled bool, cmd tea.Cmd) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, nil
+	}
+
+	// In list mode, check for item clicks
+	if fd.mode == FavoritesModeList {
+		visibleStart := fd.offset
+		visibleEnd := fd.offset + fd.Height - 10
+		if visibleEnd > len(fd.favorites) {
+			visibleEnd = len(fd.favorites)
+		}
+
+		for i := visibleStart; i < visibleEnd; i++ {
+			zoneID := fmt.Sprintf("%s%d", ZoneFavoriteItemPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				// Click on already selected executes
+				if i == fd.selected {
+					fav := fd.favorites[fd.selected]
+					return true, func() tea.Msg {
+						return ExecuteFavoriteMsg{Favorite: fav}
+					}
+				}
+				// First click selects
+				fd.selected = i
+				fd.deleteConfirmMode = false
+				return true, nil
+			}
+		}
+	}
+
+	// In edit mode, check for field clicks
+	if fd.mode == FavoritesModeAdd || fd.mode == FavoritesModeEdit {
+		for i := 0; i < 4; i++ {
+			zoneID := fmt.Sprintf("%s%d", ZoneFavoriteFieldPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				fd.currentField = i
+				fd.validationError = ""
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea.Cmd) {
@@ -414,7 +524,10 @@ func (fd *FavoritesDialog) renderList() string {
 					style = style.Background(fd.Theme.Selection).Foreground(fd.Theme.Foreground)
 				}
 			}
-			sections = append(sections, style.Render(line))
+			renderedLine := style.Render(line)
+			// Wrap with zone mark for mouse click
+			zoneID := fmt.Sprintf("%s%d", ZoneFavoriteItemPrefix, i)
+			sections = append(sections, zone.Mark(zoneID, renderedLine))
 		}
 	}
 
@@ -461,12 +574,12 @@ func (fd *FavoritesDialog) renderEdit() string {
 		sections = append(sections, errorStyle.Render("⚠ "+fd.validationError))
 	}
 
-	// Fields
+	// Fields with zone marks for mouse clicks
 	sections = append(sections, "")
-	sections = append(sections, fd.renderField("Name: (required)", fd.nameInput, fd.currentField == 0))
-	sections = append(sections, fd.renderField("Description:", fd.descriptionInput, fd.currentField == 1))
-	sections = append(sections, fd.renderField("Query: (required)", fd.queryInput, fd.currentField == 2))
-	sections = append(sections, fd.renderField("Tags: (comma separated, optional)", fd.tagsInput, fd.currentField == 3))
+	sections = append(sections, zone.Mark(ZoneFavoriteFieldPrefix+"0", fd.renderField("Name: (required)", fd.nameInput, fd.currentField == 0)))
+	sections = append(sections, zone.Mark(ZoneFavoriteFieldPrefix+"1", fd.renderField("Description:", fd.descriptionInput, fd.currentField == 1)))
+	sections = append(sections, zone.Mark(ZoneFavoriteFieldPrefix+"2", fd.renderField("Query: (required)", fd.queryInput, fd.currentField == 2)))
+	sections = append(sections, zone.Mark(ZoneFavoriteFieldPrefix+"3", fd.renderField("Tags: (comma separated, optional)", fd.tagsInput, fd.currentField == 3)))
 
 	// Help text
 	helpStyle := lipgloss.NewStyle().

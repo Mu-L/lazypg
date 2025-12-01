@@ -8,10 +8,16 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneStructureTabPrefix = "structure-tab-"
 )
 
 // StructureView is a tabbed container for viewing table structure
@@ -242,6 +248,26 @@ func (sv *StructureView) SwitchTab(tabIndex int) {
 	}
 }
 
+// HandleMouseClick handles mouse click events on the tab bar
+// Returns (handled, tabIndex) where tabIndex is the clicked tab (-1 if not a tab click)
+func (sv *StructureView) HandleMouseClick(msg tea.MouseMsg) (bool, int) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, -1
+	}
+
+	// Check each tab zone
+	for i := 0; i <= 3; i++ {
+		zoneID := fmt.Sprintf("%s%d", ZoneStructureTabPrefix, i)
+		if zone.Get(zoneID).InBounds(msg) {
+			sv.SwitchTab(i)
+			return true, i
+		}
+	}
+
+	return false, -1
+}
+
 // Update handles keyboard input
 func (sv *StructureView) Update(msg tea.KeyMsg) {
 	if sv.activeTab == 0 {
@@ -371,6 +397,7 @@ func (sv *StructureView) renderTabBar() string {
 	var parts []string
 
 	for i, tab := range tabs {
+		var tabContent string
 		if tab.index == sv.activeTab {
 			// Active tab - with blue indicator and background
 			indicatorStyle := lipgloss.NewStyle().
@@ -383,17 +410,19 @@ func (sv *StructureView) renderTabBar() string {
 				Background(lipgloss.Color("#313244")). // Surface0
 				Padding(0, 1)
 
-			tabContent := indicatorStyle.Render("▌") + tabStyle.Render(tab.label)
-			parts = append(parts, tabContent)
+			tabContent = indicatorStyle.Render("▌") + tabStyle.Render(tab.label)
 		} else {
 			// Inactive tab
 			tabStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6c7086")). // Overlay0
 				Padding(0, 1)
 
-			tabContent := tabStyle.Render(tab.label)
-			parts = append(parts, tabContent)
+			tabContent = tabStyle.Render(tab.label)
 		}
+
+		// Wrap with zone mark for mouse click
+		zoneID := fmt.Sprintf("%s%d", ZoneStructureTabPrefix, tab.index)
+		parts = append(parts, zone.Mark(zoneID, tabContent))
 
 		// Add separator between tabs (except after last)
 		if i < len(tabs)-1 {

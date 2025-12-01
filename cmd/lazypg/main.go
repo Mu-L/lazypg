@@ -7,6 +7,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/app"
 	"github.com/rebeliceyang/lazypg/internal/config"
 )
@@ -17,6 +18,9 @@ func main() {
 		log.Printf("Warning: Could not load config: %v (using defaults)\n", err)
 		cfg = config.GetDefaults()
 	}
+
+	// Initialize bubblezone for mouse support
+	zone.NewGlobal()
 
 	// Create context for connection management
 	ctx := context.Background()

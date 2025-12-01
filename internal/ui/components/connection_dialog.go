@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
@@ -39,6 +40,14 @@ const (
 	databaseField
 	userField
 	passwordField
+)
+
+// Zone IDs for mouse click handling
+const (
+	ZoneHistoryPrefix    = "conn-history-"
+	ZoneDiscoveredPrefix = "conn-discovered-"
+	ZoneSearchBox        = "conn-search"
+	ZoneManualField      = "conn-manual-field-"
 )
 
 // NewConnectionDialog creates a new connection dialog
@@ -196,7 +205,9 @@ func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 		c.searchInput.Width = searchInputWidth
 	}
 
-	sections = append(sections, searchBoxStyle.Render("🔍 "+c.searchInput.View()))
+	// Wrap search box with zone for click detection
+	searchBox := searchBoxStyle.Render("🔍 " + c.searchInput.View())
+	sections = append(sections, zone.Mark(ZoneSearchBox, searchBox))
 	sections = append(sections, "")
 
 	// History section header
@@ -226,7 +237,8 @@ func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 
 			itemStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#cdd6f4")).
-				PaddingLeft(2)
+				PaddingLeft(2).
+				Width(contentWidth) // Full width for better click area
 
 			// Check if this item is selected and we're in history section
 			if c.InHistorySection && i == c.SelectedIndex {
@@ -244,7 +256,9 @@ func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 				entry.Name,
 				metaStyle.Render("(local)"),
 			)
-			sections = append(sections, itemStyle.Render(line))
+			// Wrap with zone for click detection
+			zoneID := fmt.Sprintf("%s%d", ZoneHistoryPrefix, i)
+			sections = append(sections, zone.Mark(zoneID, itemStyle.Render(line)))
 			historyCount++
 		}
 	}
@@ -280,7 +294,8 @@ func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 
 			itemStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#cdd6f4")).
-				PaddingLeft(2)
+				PaddingLeft(2).
+				Width(contentWidth) // Full width for better click area
 
 			// Check if this item is selected and we're in discovered section
 			if !c.InHistorySection && i == c.SelectedIndex {
@@ -298,7 +313,9 @@ func (c *ConnectionDialog) renderDiscoveryMode(contentWidth int) string {
 				instance.Port,
 				sourceStyle.Render(fmt.Sprintf("(%s)", instance.Source.String())),
 			)
-			sections = append(sections, itemStyle.Render(line))
+			// Wrap with zone for click detection
+			zoneID := fmt.Sprintf("%s%d", ZoneDiscoveredPrefix, i)
+			sections = append(sections, zone.Mark(zoneID, itemStyle.Render(line)))
 			discoveredCount++
 		}
 	}

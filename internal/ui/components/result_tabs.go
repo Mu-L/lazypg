@@ -7,8 +7,14 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneResultTabPrefix = "result-tab-"
 )
 
 const MaxResultTabs = 10
@@ -286,6 +292,14 @@ func (rt *ResultTabs) HasTabs() bool {
 	return len(rt.tabs) > 0
 }
 
+// SetActiveTab sets the active tab by index (for mouse click)
+func (rt *ResultTabs) SetActiveTab(index int) {
+	if index < 0 || index >= len(rt.tabs) {
+		return
+	}
+	rt.activeIdx = index
+}
+
 // RenderTabBar renders the tab bar
 func (rt *ResultTabs) RenderTabBar(width int) string {
 	if len(rt.tabs) == 0 {
@@ -331,7 +345,9 @@ func (rt *ResultTabs) RenderTabBar(width int) string {
 				Padding(0, 1)
 		}
 
-		tabViews = append(tabViews, style.Render(label))
+		// Wrap each tab with zone mark for click detection
+		zoneID := fmt.Sprintf("%s%d", ZoneResultTabPrefix, i)
+		tabViews = append(tabViews, zone.Mark(zoneID, style.Render(label)))
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, tabViews...)

@@ -32,8 +32,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneTreeRowPrefix = "tree-row-"
 )
 
 // TreeView represents a visual tree component for displaying hierarchical data
@@ -116,11 +122,14 @@ func (tv *TreeView) View() string {
 		endIdx = len(visibleNodes)
 	}
 
-	// Render visible nodes
+	// Render visible nodes with zone marks for mouse support
 	for i := startIdx; i < endIdx; i++ {
 		node := visibleNodes[i]
 		line := tv.renderNode(node, i == tv.CursorIndex)
-		lines = append(lines, line)
+		// Wrap each row with zone mark for click detection
+		// Use visible row index (i - startIdx) for zone ID
+		zoneID := fmt.Sprintf("%s%d", ZoneTreeRowPrefix, i-startIdx)
+		lines = append(lines, zone.Mark(zoneID, line))
 	}
 
 	// Fill remaining space if needed
@@ -545,4 +554,122 @@ func (tv *TreeView) ExpandAndNavigateToNode(nodeID string) bool {
 	}
 
 	return false
+}
+
+// ScrollUp scrolls the tree view up by n lines (for mouse wheel)
+func (tv *TreeView) ScrollUp(n int) {
+	if tv.Root == nil {
+		return
+	}
+
+	visibleNodes := tv.Root.Flatten()
+	if len(visibleNodes) == 0 {
+		return
+	}
+
+	// Scroll viewport up (like lazygit)
+	tv.ScrollOffset -= n
+	if tv.ScrollOffset < 0 {
+		tv.ScrollOffset = 0
+	}
+
+	// Keep cursor within visible range
+	if tv.CursorIndex >= tv.ScrollOffset+tv.Height {
+		tv.CursorIndex = tv.ScrollOffset + tv.Height - 1
+	}
+	if tv.CursorIndex < tv.ScrollOffset {
+		tv.CursorIndex = tv.ScrollOffset
+	}
+	// Bounds check
+	if tv.CursorIndex >= len(visibleNodes) {
+		tv.CursorIndex = len(visibleNodes) - 1
+	}
+	if tv.CursorIndex < 0 {
+		tv.CursorIndex = 0
+	}
+}
+
+// ScrollDown scrolls the tree view down by n lines (for mouse wheel)
+func (tv *TreeView) ScrollDown(n int) {
+	if tv.Root == nil {
+		return
+	}
+
+	visibleNodes := tv.Root.Flatten()
+	if len(visibleNodes) == 0 {
+		return
+	}
+
+	// Scroll viewport down (like lazygit)
+	maxScrollOffset := len(visibleNodes) - tv.Height
+	if maxScrollOffset < 0 {
+		maxScrollOffset = 0
+	}
+	tv.ScrollOffset += n
+	if tv.ScrollOffset > maxScrollOffset {
+		tv.ScrollOffset = maxScrollOffset
+	}
+
+	// Keep cursor within visible range
+	if tv.CursorIndex < tv.ScrollOffset {
+		tv.CursorIndex = tv.ScrollOffset
+	}
+	if tv.CursorIndex >= tv.ScrollOffset+tv.Height {
+		tv.CursorIndex = tv.ScrollOffset + tv.Height - 1
+	}
+	// Bounds check
+	if tv.CursorIndex >= len(visibleNodes) {
+		tv.CursorIndex = len(visibleNodes) - 1
+	}
+	if tv.CursorIndex < 0 {
+		tv.CursorIndex = 0
+	}
+}
+
+// HandleClick handles mouse click at a specific row offset from the top of the visible area
+// Lazygit-style: clicking already selected item triggers action (select for tables, toggle for expandable)
+func (tv *TreeView) HandleClick(clickedRow int) (*TreeView, tea.Cmd) {
+	if tv.Root == nil {
+		return tv, nil
+	}
+
+	visibleNodes := tv.Root.Flatten()
+	if len(visibleNodes) == 0 {
+		return tv, nil
+	}
+
+	// Calculate which node was clicked
+	targetIndex := tv.ScrollOffset + clickedRow
+	if targetIndex < 0 || targetIndex >= len(visibleNodes) {
+		return tv, nil
+	}
+
+	clickedNode := visibleNodes[targetIndex]
+	wasAlreadySelected := tv.CursorIndex == targetIndex
+
+	// Update cursor to clicked node
+	tv.CursorIndex = targetIndex
+
+	// If clicking already selected node, trigger action
+	if wasAlreadySelected {
+		// For expandable nodes, toggle expansion
+		if len(clickedNode.Children) > 0 || !clickedNode.Loaded {
+			clickedNode.Toggle()
+			return tv, func() tea.Msg {
+				return TreeNodeExpandedMsg{
+					Node:     clickedNode,
+					Expanded: clickedNode.Expanded,
+				}
+			}
+		}
+		// For selectable leaf nodes (tables), select/activate them
+		if clickedNode.Selectable {
+			return tv, func() tea.Msg {
+				return TreeNodeSelectedMsg{Node: clickedNode}
+			}
+		}
+	}
+
+	// First click just selects the node (no action)
+	return tv, nil
 }

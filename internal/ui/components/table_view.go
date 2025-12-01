@@ -7,9 +7,16 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/mattn/go-runewidth"
 	"github.com/rebeliceyang/lazypg/internal/jsonb"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneTableRowPrefix  = "table-row-"
+	ZoneTableCellPrefix = "table-cell-" // Format: table-cell-{row}-{col}
 )
 
 // TableView displays table data with virtual scrolling
@@ -58,6 +65,28 @@ type TableView struct {
 	PendingCount     string    // Number prefix buffer (e.g., "42")
 	PendingCountTime time.Time // Last input time for timeout
 	PendingG         bool      // Waiting for second 'g' in 'gg'
+
+	// Cached styles for performance (avoid recreating on every render)
+	cachedStyles *tableViewStyles
+}
+
+// tableViewStyles holds pre-computed styles for TableView rendering
+type tableViewStyles struct {
+	headerBg         lipgloss.Style
+	headerLineNum    lipgloss.Style
+	headerSep        lipgloss.Style
+	separator        lipgloss.Style
+	separatorHeader  lipgloss.Style
+	border           lipgloss.Style
+	selectedCell     lipgloss.Style
+	currentMatch     lipgloss.Style
+	otherMatch       lipgloss.Style
+	selectedRow      lipgloss.Style
+	normal           lipgloss.Style
+	lineNumNormal    lipgloss.Style
+	lineNumSelected  lipgloss.Style
+	lineNumRelative  lipgloss.Style
+	status           lipgloss.Style
 }
 
 // MatchPos represents a search match position
@@ -68,7 +97,7 @@ type MatchPos struct {
 
 // NewTableView creates a new table view with theme
 func NewTableView(th theme.Theme) *TableView {
-	return &TableView{
+	tv := &TableView{
 		Columns:         []string{},
 		Rows:            [][]string{},
 		ColumnWidths:    []int{},
@@ -79,6 +108,52 @@ func NewTableView(th theme.Theme) *TableView {
 		PreviewPane:     NewPreviewPane(th),
 		ShowLineNumbers: true,  // Default to showing line numbers
 		RelativeNumbers: false, // Default to absolute line numbers
+	}
+	tv.initStyles()
+	return tv
+}
+
+// initStyles initializes cached styles for rendering performance
+func (tv *TableView) initStyles() {
+	tv.cachedStyles = &tableViewStyles{
+		headerBg: lipgloss.NewStyle().Background(tv.Theme.Selection),
+		headerLineNum: lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Metadata),
+		headerSep: lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Border),
+		separator: lipgloss.NewStyle().
+			Foreground(tv.Theme.Border),
+		separatorHeader: lipgloss.NewStyle().
+			Foreground(tv.Theme.Border).
+			Background(tv.Theme.Selection),
+		border: lipgloss.NewStyle().Foreground(tv.Theme.Border),
+		selectedCell: lipgloss.NewStyle().
+			Background(tv.Theme.BorderFocused).
+			Foreground(tv.Theme.Background).
+			Bold(true),
+		currentMatch: lipgloss.NewStyle().
+			Background(lipgloss.Color("#f9e2af")). // Yellow
+			Foreground(lipgloss.Color("#1e1e2e")). // Dark
+			Bold(true),
+		otherMatch: lipgloss.NewStyle().
+			Background(lipgloss.Color("#585b70")). // Surface2
+			Foreground(tv.Theme.Foreground),
+		selectedRow: lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Foreground),
+		normal: lipgloss.NewStyle(),
+		lineNumNormal: lipgloss.NewStyle().
+			Foreground(tv.Theme.Metadata),
+		lineNumSelected: lipgloss.NewStyle().
+			Foreground(tv.Theme.Info).
+			Bold(true),
+		lineNumRelative: lipgloss.NewStyle().
+			Foreground(tv.Theme.Comment),
+		status: lipgloss.NewStyle().
+			Foreground(tv.Theme.Metadata).
+			Italic(true),
 	}
 }
 
@@ -146,23 +221,20 @@ func (tv *TableView) renderLineNumber(rowIndex int, isSelected bool) string {
 	// Format the number right-aligned
 	numStr := fmt.Sprintf("%*d", digits, displayNum)
 
-	// Style based on selection
+	// Use cached styles based on selection
 	var style lipgloss.Style
 	if isSelected {
 		// Current line: highlighted
-		style = lipgloss.NewStyle().
-			Foreground(tv.Theme.Info).
-			Bold(true)
+		style = tv.cachedStyles.lineNumSelected
+	} else if tv.RelativeNumbers {
+		// Relative numbers: use comment color
+		style = tv.cachedStyles.lineNumRelative
 	} else {
 		// Other lines: dimmed
-		style = lipgloss.NewStyle().
-			Foreground(tv.Theme.Metadata)
+		style = tv.cachedStyles.lineNumNormal
 	}
 
-	// Separator style
-	sepStyle := lipgloss.NewStyle().Foreground(tv.Theme.Border)
-
-	return style.Render(numStr) + sepStyle.Render(" │ ")
+	return style.Render(numStr) + tv.cachedStyles.separator.Render(" │ ")
 }
 
 // ToggleRelativeNumbers toggles between absolute and relative line numbers
@@ -272,34 +344,25 @@ func (tv *TableView) View() string {
 	lineNumWidth := tv.getLineNumberWidth()
 
 	// Render header with line number column styled to match header background
-	headerBgStyle := lipgloss.NewStyle().Background(tv.Theme.Selection)
 	if tv.ShowLineNumbers {
-		// Create header-styled line number placeholder
-		headerLineNumStyle := lipgloss.NewStyle().
-			Background(tv.Theme.Selection).
-			Foreground(tv.Theme.Metadata)
 		// Use "#" as header for line number column
 		numColWidth := lineNumWidth - 3 // subtract " │ "
 		headerLineNum := fmt.Sprintf("%*s", numColWidth, "#")
-		sepStyle := lipgloss.NewStyle().
-			Background(tv.Theme.Selection).
-			Foreground(tv.Theme.Border)
-		b.WriteString(headerLineNumStyle.Render(headerLineNum))
-		b.WriteString(sepStyle.Render(" │ "))
+		b.WriteString(tv.cachedStyles.headerLineNum.Render(headerLineNum))
+		b.WriteString(tv.cachedStyles.headerSep.Render(" │ "))
 	}
 	// Left indicator with header background
-	b.WriteString(headerBgStyle.Render(leftIndicator))
+	b.WriteString(tv.cachedStyles.headerBg.Render(leftIndicator))
 	b.WriteString(tv.renderHeader())
-	b.WriteString(headerBgStyle.Render(rightIndicator))
+	b.WriteString(tv.cachedStyles.headerBg.Render(rightIndicator))
 	b.WriteString("\n")
 
 	// Render separator (extend through line number column)
-	sepStyle := lipgloss.NewStyle().Foreground(tv.Theme.Border)
 	lineNumSep := strings.Repeat("─", lineNumWidth)
-	b.WriteString(sepStyle.Render(lineNumSep))
-	b.WriteString(sepStyle.Render("──")) // Align with left indicator
+	b.WriteString(tv.cachedStyles.border.Render(lineNumSep))
+	b.WriteString(tv.cachedStyles.border.Render("──")) // Align with left indicator
 	b.WriteString(tv.renderSeparator())
-	b.WriteString(sepStyle.Render("──"))
+	b.WriteString(tv.cachedStyles.border.Render("──"))
 	b.WriteString("\n")
 
 	// Calculate how many rows we can show
@@ -318,11 +381,19 @@ func (tv *TableView) View() string {
 
 	for i := tv.TopRow; i < endRow; i++ {
 		isSelected := i == tv.SelectedRow
-		// Render line number
-		b.WriteString(tv.renderLineNumber(i, isSelected))
-		b.WriteString("  ") // Align with left indicator
-		b.WriteString(tv.renderRow(tv.Rows[i], isSelected, i))
-		b.WriteString("  ")
+		visibleRowIndex := i - tv.TopRow
+
+		// Build row content with cell-level zone marks
+		var rowBuilder strings.Builder
+		rowBuilder.WriteString(tv.renderLineNumber(i, isSelected))
+		rowBuilder.WriteString("  ") // Align with left indicator
+		rowBuilder.WriteString(tv.renderRow(tv.Rows[i], isSelected, i, visibleRowIndex))
+		rowBuilder.WriteString("  ")
+
+		// Wrap entire row with zone mark for row-level click detection
+		zoneID := fmt.Sprintf("%s%d", ZoneTableRowPrefix, visibleRowIndex)
+		b.WriteString(zone.Mark(zoneID, rowBuilder.String()))
+
 		if i < endRow-1 {
 			b.WriteString("\n")
 		}
@@ -338,11 +409,8 @@ func (tv *TableView) View() string {
 func (tv *TableView) renderHeader() string {
 	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
 
-	// Create separator style
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(tv.Theme.Border).
-		Background(tv.Theme.Selection)
-	separator := separatorStyle.Render(" │ ")
+	// Use cached separator style
+	separator := tv.cachedStyles.separatorHeader.Render(" │ ")
 
 	// Only render visible columns
 	endCol := tv.LeftColOffset + tv.VisibleCols
@@ -378,18 +446,11 @@ func (tv *TableView) renderHeader() string {
 		// Use runewidth.Truncate for proper truncation
 		truncated := runewidth.Truncate(displayCol, width, "…")
 
-		// Create cell width style
-		widthStyle := lipgloss.NewStyle().
-			Width(width).
-			MaxWidth(width).
-			Inline(true)
-
-		// Create header cell style
-		headerCellStyle := lipgloss.NewStyle().
-			Background(tv.Theme.Selection)
+		// Apply width constraint inline (can't easily cache width-specific styles)
+		widthStyle := tv.cachedStyles.headerBg.Width(width).MaxWidth(width).Inline(true)
 
 		// Render cell with header background
-		renderedCell := headerCellStyle.Render(widthStyle.Render(truncated))
+		renderedCell := widthStyle.Render(truncated)
 		s = append(s, renderedCell)
 
 		// Add separator between columns (but not after the last visible column)
@@ -401,7 +462,7 @@ func (tv *TableView) renderHeader() string {
 	// Join header cells horizontally with separators
 	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, s...)
 
-	// Apply bold and color to the entire row
+	// Apply bold and color to the entire row (this needs Bold which we don't cache with headerBg)
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(tv.Theme.TableHeader)
@@ -427,20 +488,15 @@ func (tv *TableView) renderSeparator() string {
 		totalWidth += 3 * (visibleCount - 1)
 	}
 
-	// Create a simple horizontal line
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(tv.Theme.Border)
-
-	return separatorStyle.Render(strings.Repeat("─", totalWidth))
+	// Use cached border style
+	return tv.cachedStyles.border.Render(strings.Repeat("─", totalWidth))
 }
 
-func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string {
+func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibleRowIndex int) string {
 	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
 
-	// Create separator style (always uses border color, no background)
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(tv.Theme.Border)
-	separator := separatorStyle.Render(" │ ")
+	// Use cached separator style
+	separator := tv.cachedStyles.separator.Render(" │ ")
 
 	// Only render visible columns
 	endCol := tv.LeftColOffset + tv.VisibleCols
@@ -448,6 +504,7 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string
 		endCol = len(tv.ColumnWidths)
 	}
 
+	visibleColIndex := 0
 	for i := tv.LeftColOffset; i < endCol; i++ {
 		if i >= len(row) || i >= len(tv.ColumnWidths) {
 			break
@@ -468,50 +525,42 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string
 		// Use runewidth.Truncate for proper truncation (handles multibyte chars)
 		truncated := runewidth.Truncate(cellValue, width, "…")
 
-		// Create cell width style
-		widthStyle := lipgloss.NewStyle().
-			Width(width).
-			MaxWidth(width).
-			Inline(true)
-
-		// Determine cell background based on selection and search
+		// Determine cell style based on selection and search
 		// Priority: selected cell > current match > other matches > selected row > normal
 		var cellStyle lipgloss.Style
 		if selected && i == tv.SelectedCol {
 			// Selected cell - highest priority, bright highlight
-			cellStyle = lipgloss.NewStyle().
-				Background(tv.Theme.BorderFocused).
-				Foreground(tv.Theme.Background).
-				Bold(true)
+			cellStyle = tv.cachedStyles.selectedCell
 		} else if tv.IsCurrentMatch(rowIndex, i) {
 			// Current search match - bright yellow highlight
-			cellStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#f9e2af")). // Yellow
-				Foreground(lipgloss.Color("#1e1e2e")). // Dark
-				Bold(true)
+			cellStyle = tv.cachedStyles.currentMatch
 		} else if tv.IsMatch(rowIndex, i) {
 			// Other search match - subtle highlight
-			cellStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#585b70")). // Surface2
-				Foreground(tv.Theme.Foreground)
+			cellStyle = tv.cachedStyles.otherMatch
 		} else if selected {
 			// Selected row but not selected column - dim highlight
-			cellStyle = lipgloss.NewStyle().
-				Background(tv.Theme.Selection).
-				Foreground(tv.Theme.Foreground)
+			cellStyle = tv.cachedStyles.selectedRow
 		} else {
 			// Normal cell
-			cellStyle = lipgloss.NewStyle()
+			cellStyle = tv.cachedStyles.normal
 		}
 
-		// Render cell: first apply width, then apply cell style
-		renderedCell := cellStyle.Render(widthStyle.Render(truncated))
+		// Apply width constraint to the cell style and render
+		renderedCell := cellStyle.Width(width).MaxWidth(width).Inline(true).Render(truncated)
+
+		// Wrap cell with zone mark for click detection
+		// Format: table-cell-{visibleRow}-{visibleCol}
+		zoneID := fmt.Sprintf("%s%d-%d", ZoneTableCellPrefix, visibleRowIndex, visibleColIndex)
+		renderedCell = zone.Mark(zoneID, renderedCell)
+
 		s = append(s, renderedCell)
 
 		// Add separator between columns (but not after the last visible column)
 		if i < endCol-1 {
 			s = append(s, separator)
 		}
+
+		visibleColIndex++
 	}
 
 	// Join cells horizontally with separators
@@ -543,10 +592,7 @@ func (tv *TableView) renderStatus() string {
 	}
 
 	showing := fmt.Sprintf(" 󰈙 %s%s%d-%d of %d rows", matchInfo, colInfo, tv.TopRow+1, endRow, tv.TotalRows)
-	return lipgloss.NewStyle().
-		Foreground(tv.Theme.Metadata).
-		Italic(true).
-		Render(showing)
+	return tv.cachedStyles.status.Render(showing)
 }
 
 func (tv *TableView) pad(s string, width int) string {
@@ -567,6 +613,76 @@ func (tv *TableView) MoveSelection(delta int) {
 	if tv.SelectedRow >= len(tv.Rows) {
 		tv.SelectedRow = len(tv.Rows) - 1
 	}
+
+	// Adjust visible window if needed
+	if tv.SelectedRow < tv.TopRow {
+		tv.TopRow = tv.SelectedRow
+	}
+	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
+		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
+	}
+
+	// Update preview pane only if visible
+	if tv.PreviewPane != nil && tv.PreviewPane.Visible {
+		tv.UpdatePreviewPane()
+	}
+}
+
+// ScrollViewport scrolls the viewport without changing selection (like lazygit)
+// Returns true if we might need to load more data (scrolled near the end)
+func (tv *TableView) ScrollViewport(delta int) bool {
+	if len(tv.Rows) == 0 {
+		return false
+	}
+
+	// Calculate new TopRow
+	newTopRow := tv.TopRow + delta
+
+	// Bounds checking for TopRow
+	if newTopRow < 0 {
+		newTopRow = 0
+	}
+	maxTopRow := len(tv.Rows) - tv.VisibleRows
+	if maxTopRow < 0 {
+		maxTopRow = 0
+	}
+	if newTopRow > maxTopRow {
+		newTopRow = maxTopRow
+	}
+
+	tv.TopRow = newTopRow
+
+	// Adjust selection to stay within visible range
+	if tv.SelectedRow < tv.TopRow {
+		tv.SelectedRow = tv.TopRow
+	}
+	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
+		tv.SelectedRow = tv.TopRow + tv.VisibleRows - 1
+	}
+
+	// Update preview pane only if visible
+	if tv.PreviewPane != nil && tv.PreviewPane.Visible {
+		tv.UpdatePreviewPane()
+	}
+
+	// Return true if scrolled near bottom (for lazy loading)
+	return tv.TopRow+tv.VisibleRows >= len(tv.Rows)-10
+}
+
+// SetSelectedRow sets the selection to a specific row (for mouse click)
+func (tv *TableView) SetSelectedRow(row int) {
+	// Bounds checking
+	if row < 0 {
+		row = 0
+	}
+	if row >= len(tv.Rows) {
+		row = len(tv.Rows) - 1
+	}
+	if row < 0 {
+		return // No rows
+	}
+
+	tv.SelectedRow = row
 
 	// Adjust visible window if needed
 	if tv.SelectedRow < tv.TopRow {

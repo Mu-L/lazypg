@@ -3,9 +3,19 @@ package components
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
+
+// Zone ID for error overlay dismiss button
+const (
+	ZoneErrorDismiss = "error-dismiss"
+)
+
+// CloseErrorOverlayMsg is sent when error overlay should close
+type CloseErrorOverlayMsg struct{}
 
 // ErrorOverlay represents an error message overlay
 type ErrorOverlay struct {
@@ -68,8 +78,9 @@ func (e *ErrorOverlay) View() string {
 	content.WriteString(messageStyle.Render(wrappedMessage))
 	content.WriteString("\n")
 
-	// Footer
-	content.WriteString(footerStyle.Render("Press Enter or Esc to dismiss"))
+	// Footer with clickable dismiss text
+	dismissText := footerStyle.Render("Press Enter or Esc to dismiss")
+	content.WriteString(zone.Mark(ZoneErrorDismiss, dismissText))
 
 	// Box style with error border - don't set Width, let it size naturally
 	boxStyle := lipgloss.NewStyle().
@@ -80,6 +91,25 @@ func (e *ErrorOverlay) View() string {
 		Background(e.Theme.Background)
 
 	return boxStyle.Render(content.String())
+}
+
+// HandleMouseClick handles mouse click events
+// Returns true if click was handled (clicking anywhere on overlay dismisses it)
+func (e *ErrorOverlay) HandleMouseClick(msg tea.MouseMsg) (handled bool, cmd tea.Cmd) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, nil
+	}
+
+	// Check if clicked on dismiss zone (or anywhere on overlay to dismiss)
+	if zone.Get(ZoneErrorDismiss).InBounds(msg) {
+		return true, func() tea.Msg {
+			return CloseErrorOverlayMsg{}
+		}
+	}
+
+	// Any click on overlay area could dismiss - handled by app.go checking overlay bounds
+	return false, nil
 }
 
 // wrapText wraps text to fit within the specified width

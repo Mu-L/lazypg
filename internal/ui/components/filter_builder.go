@@ -6,9 +6,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/filter"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneFilterConditionPrefix = "filter-cond-"
+	ZoneFilterOperatorPrefix  = "filter-op-"
 )
 
 // ApplyFilterMsg is sent when a filter should be applied
@@ -257,6 +264,92 @@ func (fb *FilterBuilder) updatePreview() {
 	}
 }
 
+// HandleMouseWheel handles mouse wheel events for scrolling
+// Returns true if the event was handled
+func (fb *FilterBuilder) HandleMouseWheel(msg tea.MouseMsg) bool {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if fb.editMode == "" {
+			// Navigation mode - scroll conditions
+			if fb.currentIndex > 0 {
+				fb.currentIndex--
+			}
+		} else if fb.editMode == "operator" {
+			// Operator mode - scroll operators
+			if fb.operatorIndex > 0 {
+				fb.operatorIndex--
+			}
+		}
+		return true
+	case tea.MouseButtonWheelDown:
+		if fb.editMode == "" {
+			// Navigation mode - scroll conditions
+			if fb.currentIndex < len(fb.filter.RootGroup.Conditions) {
+				fb.currentIndex++
+			}
+		} else if fb.editMode == "operator" {
+			// Operator mode - scroll operators
+			if fb.operatorIndex < len(fb.availableOps)-1 {
+				fb.operatorIndex++
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// HandleMouseClick handles mouse click events
+// Returns true if click was handled, and a command if needed
+func (fb *FilterBuilder) HandleMouseClick(msg tea.MouseMsg) (handled bool, cmd tea.Cmd) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, nil
+	}
+
+	// In navigation mode, check for condition clicks
+	if fb.editMode == "" {
+		for i := 0; i < len(fb.filter.RootGroup.Conditions); i++ {
+			zoneID := fmt.Sprintf("%s%d", ZoneFilterConditionPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				fb.currentIndex = i
+				return true, nil
+			}
+		}
+	}
+
+	// In operator mode, check for operator clicks
+	if fb.editMode == "operator" {
+		for i := 0; i < len(fb.availableOps); i++ {
+			zoneID := fmt.Sprintf("%s%d", ZoneFilterOperatorPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				// If clicking on already selected, confirm selection
+				if i == fb.operatorIndex {
+					selectedOp := fb.availableOps[fb.operatorIndex]
+					if selectedOp == models.OpIsNull || selectedOp == models.OpIsNotNull {
+						// No value needed, add condition immediately
+						fb.filter.RootGroup.Conditions = append(fb.filter.RootGroup.Conditions, models.FilterCondition{
+							Column:   fb.selectedColumn.Name,
+							Operator: selectedOp,
+							Value:    nil,
+							Type:     fb.selectedColumn.DataType,
+						})
+						fb.editMode = ""
+						fb.updatePreview()
+					} else {
+						fb.editMode = "value"
+						fb.valueInput = ""
+					}
+				} else {
+					fb.operatorIndex = i
+				}
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // View renders the filter builder
 func (fb *FilterBuilder) View() string {
 	var sections []string
@@ -309,7 +402,10 @@ func (fb *FilterBuilder) View() string {
 			if i == fb.currentIndex && fb.editMode == "" {
 				style = style.Background(fb.Theme.Selection).Foreground(fb.Theme.Foreground)
 			}
-			sections = append(sections, style.Render(fmt.Sprintf(" %d. %s", i+1, condStr)))
+			line := style.Render(fmt.Sprintf(" %d. %s", i+1, condStr))
+			// Wrap with zone mark for mouse click
+			zoneID := fmt.Sprintf("%s%d", ZoneFilterConditionPrefix, i)
+			sections = append(sections, zone.Mark(zoneID, line))
 		}
 	}
 
@@ -327,7 +423,10 @@ func (fb *FilterBuilder) View() string {
 				if i == fb.operatorIndex {
 					style = style.Background(fb.Theme.Selection).Foreground(fb.Theme.Foreground)
 				}
-				sections = append(sections, style.Render(fmt.Sprintf("  %s", op)))
+				line := style.Render(fmt.Sprintf("  %s", op))
+				// Wrap with zone mark for mouse click
+				zoneID := fmt.Sprintf("%s%d", ZoneFilterOperatorPrefix, i)
+				sections = append(sections, zone.Mark(zoneID, line))
 			}
 		case "value":
 			sections = append(sections, fmt.Sprintf("Column: %s %s", fb.selectedColumn.Name, fb.availableOps[fb.operatorIndex]))

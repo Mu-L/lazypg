@@ -15,13 +15,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/commands"
 	"github.com/rebeliceyang/lazypg/internal/config"
+	"github.com/rebeliceyang/lazypg/internal/connection_history"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 	"github.com/rebeliceyang/lazypg/internal/db/discovery"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
 	"github.com/rebeliceyang/lazypg/internal/db/query"
-	"github.com/rebeliceyang/lazypg/internal/connection_history"
 	"github.com/rebeliceyang/lazypg/internal/favorites"
 	filterBuilder "github.com/rebeliceyang/lazypg/internal/filter"
 	"github.com/rebeliceyang/lazypg/internal/history"
@@ -257,7 +258,7 @@ func New(cfg *config.Config) *App {
 		searchInput:       searchInput,
 		executeSpinner:    s,
 		leftPanel: components.Panel{
-			Title:   "Navigation",
+			Title:   "Explorer",
 			Content: "Databases\n└─ (empty)",
 			Style:   lipgloss.NewStyle().BorderForeground(th.BorderFocused),
 		},
@@ -297,6 +298,9 @@ func (a *App) Init() tea.Cmd {
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return a.handleMouseEvent(msg)
+
 	case spinner.TickMsg:
 		// Update spinner when there's a pending query
 		if a.resultTabs.HasPendingQuery() {
@@ -499,6 +503,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case components.CloseJSONBViewerMsg:
 		a.showJSONBViewer = false
+		return a, nil
+
+	case components.CloseErrorOverlayMsg:
+		a.showError = false
+		return a, nil
+
+	case components.CloseCommandPaletteMsg:
+		a.showCommandPalette = false
 		return a, nil
 
 	case components.ExecuteFavoriteMsg:
@@ -1371,9 +1383,9 @@ func (a *App) View() string {
 		)
 	}
 
-	// If connection dialog is showing, render it
+	// If connection dialog is showing, render it with zone.Scan for mouse support
 	if a.showConnectionDialog {
-		return a.renderConnectionDialog()
+		return zone.Scan(a.renderConnectionDialog())
 	}
 
 	// If in help mode, show help overlay
@@ -1381,7 +1393,8 @@ func (a *App) View() string {
 		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
 	}
 
-	return a.renderNormalView()
+	// Wrap normal view with zone.Scan for mouse support
+	return zone.Scan(a.renderNormalView())
 }
 
 // renderNormalView renders the normal application view
@@ -1877,6 +1890,447 @@ func (a *App) updatePanelStyles() {
 			Foreground(lipgloss.Color("#cdd6f4"))        // Text
 	}
 }
+
+// handleMouseEvent processes mouse events for scrolling and clicking using bubblezone
+func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Handle connection dialog mouse events
+	if a.showConnectionDialog {
+		return a.handleConnectionDialogMouse(msg)
+	}
+
+	// Route mouse events to overlays first
+	if a.showError {
+		handled, cmd := a.errorOverlay.HandleMouseClick(msg)
+		if handled {
+			if cmd != nil {
+				return a, cmd
+			}
+		}
+		// Block other mouse events when error overlay is showing
+		return a, nil
+	}
+
+	if a.showCommandPalette {
+		// Handle scroll wheel
+		if a.commandPalette.HandleMouseWheel(msg) {
+			return a, nil
+		}
+		// Handle click
+		handled, cmd := a.commandPalette.HandleMouseClick(msg)
+		if handled {
+			if cmd != nil {
+				return a, cmd
+			}
+			return a, nil
+		}
+		// Block other mouse events when command palette is showing
+		return a, nil
+	}
+
+	if a.showFilterBuilder {
+		// Handle scroll wheel
+		if a.filterBuilder.HandleMouseWheel(msg) {
+			return a, nil
+		}
+		// Handle click
+		handled, cmd := a.filterBuilder.HandleMouseClick(msg)
+		if handled {
+			if cmd != nil {
+				return a, cmd
+			}
+			return a, nil
+		}
+		// Block other mouse events when filter builder is showing
+		return a, nil
+	}
+
+	if a.showJSONBViewer {
+		// Handle scroll wheel
+		if a.jsonbViewer.HandleMouseWheel(msg) {
+			return a, nil
+		}
+		// Handle click
+		handled, cmd := a.jsonbViewer.HandleMouseClick(msg)
+		if handled {
+			if cmd != nil {
+				return a, cmd
+			}
+			return a, nil
+		}
+		// Block other mouse events when JSONB viewer is showing
+		return a, nil
+	}
+
+	if a.showFavorites {
+		// Handle scroll wheel
+		if a.favoritesDialog.HandleMouseWheel(msg) {
+			return a, nil
+		}
+		// Handle click
+		handled, cmd := a.favoritesDialog.HandleMouseClick(msg)
+		if handled {
+			if cmd != nil {
+				return a, cmd
+			}
+			return a, nil
+		}
+		// Block other mouse events when favorites dialog is showing
+		return a, nil
+	}
+
+	// Handle structure view tabs (when a table is selected, structure view is shown)
+	if a.currentTable != "" {
+		handled, tabIndex := a.structureView.HandleMouseClick(msg)
+		if handled {
+			// Sync a.currentTab with the clicked tab
+			if tabIndex >= 0 {
+				a.currentTab = tabIndex
+			}
+			return a, nil
+		}
+		// Fall through to normal table handling for the structure view content
+	}
+
+	// Search input doesn't need mouse handling currently
+	if a.showSearch {
+		// Block other mouse events when search is showing
+		return a, nil
+	}
+
+	// Handle scroll events (these don't need zone detection)
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		// Check which zone we're scrolling in
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTreeRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				a.treeView.ScrollUp(3)
+				return a, nil
+			}
+		}
+		// Check table cells or rows for scroll (scroll viewport, not selection)
+		tableScrolled := false
+		for row := 0; row < 100 && !tableScrolled; row++ {
+			for col := 0; col < 50; col++ {
+				zoneID := fmt.Sprintf("%s%d-%d", components.ZoneTableCellPrefix, row, col)
+				if zone.Get(zoneID).InBounds(msg) {
+					if activeTable := a.getActiveTableView(); activeTable != nil {
+						activeTable.ScrollViewport(-3) // Scroll up
+					}
+					tableScrolled = true
+					break
+				}
+			}
+		}
+		if tableScrolled {
+			return a, nil
+		}
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTableRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				if activeTable := a.getActiveTableView(); activeTable != nil {
+					activeTable.ScrollViewport(-3) // Scroll up
+				}
+				return a, nil
+			}
+		}
+		if zone.Get(components.ZoneSQLEditor).InBounds(msg) {
+			// Could add scroll in editor if needed
+			return a, nil
+		}
+		return a, nil
+
+	case tea.MouseButtonWheelDown:
+		// Check which zone we're scrolling in
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTreeRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				a.treeView.ScrollDown(3)
+				return a, nil
+			}
+		}
+		// Check table cells or rows for scroll (scroll viewport, not selection)
+		tableScrolledDown := false
+		for row := 0; row < 100 && !tableScrolledDown; row++ {
+			for col := 0; col < 50; col++ {
+				zoneID := fmt.Sprintf("%s%d-%d", components.ZoneTableCellPrefix, row, col)
+				if zone.Get(zoneID).InBounds(msg) {
+					if activeTable := a.getActiveTableView(); activeTable != nil {
+						needsLazyLoad := activeTable.ScrollViewport(3) // Scroll down
+						// Check for lazy loading (only for main table browsing)
+						if needsLazyLoad && !a.resultTabs.HasTabs() {
+							if cmd := a.checkLazyLoad(); cmd != nil {
+								return a, cmd
+							}
+						}
+					}
+					tableScrolledDown = true
+					break
+				}
+			}
+		}
+		if tableScrolledDown {
+			return a, nil
+		}
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTableRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				if activeTable := a.getActiveTableView(); activeTable != nil {
+					needsLazyLoad := activeTable.ScrollViewport(3) // Scroll down
+					// Check for lazy loading (only for main table browsing)
+					if needsLazyLoad && !a.resultTabs.HasTabs() {
+						if cmd := a.checkLazyLoad(); cmd != nil {
+							return a, cmd
+						}
+					}
+				}
+				return a, nil
+			}
+		}
+		if zone.Get(components.ZoneSQLEditor).InBounds(msg) {
+			// Could add scroll in editor if needed
+			return a, nil
+		}
+		return a, nil
+
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress {
+			return a, nil
+		}
+
+		// Check result tabs first
+		for i := 0; i < components.MaxResultTabs; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneResultTabPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				a.resultTabs.SetActiveTab(i)
+				// Sync SQL editor content with new active tab
+				if activeSQL := a.resultTabs.GetActiveSQL(); activeSQL != "" {
+					a.sqlEditor.SetContent(activeSQL)
+				}
+				return a, nil
+			}
+		}
+
+		// Check tree view rows
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTreeRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				a.state.FocusedPanel = models.LeftPanel
+				a.sqlEditorFocused = false
+				a.updatePanelStyles()
+				_, cmd := a.treeView.HandleClick(i)
+				return a, cmd
+			}
+		}
+
+		// Check table view cells first (more specific than row)
+		for row := 0; row < 100; row++ {
+			for col := 0; col < 50; col++ {
+				zoneID := fmt.Sprintf("%s%d-%d", components.ZoneTableCellPrefix, row, col)
+				if zone.Get(zoneID).InBounds(msg) {
+					a.state.FocusedPanel = models.RightPanel
+					a.sqlEditorFocused = false
+					a.updatePanelStyles()
+					if activeTable := a.getActiveTableView(); activeTable != nil {
+						// Convert visible col index to actual col index
+						actualCol := activeTable.LeftColOffset + col
+						actualRow := activeTable.TopRow + row
+
+						// Check if clicking on already selected cell
+						if activeTable.SelectedRow == actualRow && activeTable.SelectedCol == actualCol {
+							// Double-click behavior: open JSONB viewer or preview pane
+							if actualRow >= 0 && actualRow < len(activeTable.Rows) && actualCol >= 0 && actualCol < len(activeTable.Columns) {
+								cellValue := activeTable.Rows[actualRow][actualCol]
+								// Check if it's JSON/JSONB data
+								if jsonb.IsJSONB(cellValue) {
+									if err := a.jsonbViewer.SetValue(cellValue); err == nil {
+										a.showJSONBViewer = true
+									}
+								} else {
+									// For non-JSONB, toggle preview pane
+									activeTable.TogglePreviewPane()
+								}
+							}
+						} else {
+							// First click: just select the cell
+							activeTable.SetSelectedRow(actualRow)
+							activeTable.SelectedCol = actualCol
+						}
+					}
+					return a, nil
+				}
+			}
+		}
+
+		// Check table view rows (fallback for areas without cell zones)
+		for i := 0; i < 100; i++ {
+			zoneID := fmt.Sprintf("%s%d", components.ZoneTableRowPrefix, i)
+			if zone.Get(zoneID).InBounds(msg) {
+				a.state.FocusedPanel = models.RightPanel
+				a.sqlEditorFocused = false
+				a.updatePanelStyles()
+				if activeTable := a.getActiveTableView(); activeTable != nil {
+					activeTable.SetSelectedRow(activeTable.TopRow + i)
+				}
+				return a, nil
+			}
+		}
+
+		// Check SQL editor
+		if zone.Get(components.ZoneSQLEditor).InBounds(msg) {
+			a.sqlEditorFocused = true
+			a.state.FocusedPanel = models.RightPanel
+			a.updatePanelStyles()
+
+			// Expand editor if collapsed
+			if !a.sqlEditor.IsExpanded() {
+				a.sqlEditor.Expand()
+			}
+			return a, nil
+		}
+
+		return a, nil
+	}
+
+	return a, nil
+}
+
+// handleConnectionDialogMouse handles mouse events for connection dialog using bubblezone
+func (a *App) handleConnectionDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Handle scroll
+	if msg.Button == tea.MouseButtonWheelUp {
+		a.connectionDialog.MoveSelection(-1)
+		return a, nil
+	}
+	if msg.Button == tea.MouseButtonWheelDown {
+		a.connectionDialog.MoveSelection(1)
+		return a, nil
+	}
+
+	// Only handle left click press
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return a, nil
+	}
+
+	// Check if click is on search box
+	if zone.Get(components.ZoneSearchBox).InBounds(msg) {
+		a.connectionDialog.EnterSearchMode()
+		return a, nil
+	}
+
+	// Check history items (up to 5)
+	filteredHistory := a.connectionDialog.GetFilteredHistory()
+	for i := 0; i < 5 && i < len(filteredHistory); i++ {
+		zoneID := fmt.Sprintf("%s%d", components.ZoneHistoryPrefix, i)
+		if zone.Get(zoneID).InBounds(msg) {
+			wasAlreadySelected := a.connectionDialog.InHistorySection && a.connectionDialog.SelectedIndex == i
+
+			a.connectionDialog.InHistorySection = true
+			a.connectionDialog.SelectedIndex = i
+
+			// If clicking already selected item, trigger connect (lazygit-style)
+			if wasAlreadySelected {
+				return a.connectToHistoryEntry(filteredHistory[i])
+			}
+			return a, nil
+		}
+	}
+
+	// Check discovered items (up to 3)
+	filteredDiscovered := a.connectionDialog.GetFilteredDiscovered()
+	for i := 0; i < 3 && i < len(filteredDiscovered); i++ {
+		zoneID := fmt.Sprintf("%s%d", components.ZoneDiscoveredPrefix, i)
+		if zone.Get(zoneID).InBounds(msg) {
+			wasAlreadySelected := !a.connectionDialog.InHistorySection && a.connectionDialog.SelectedIndex == i
+
+			a.connectionDialog.InHistorySection = false
+			a.connectionDialog.SelectedIndex = i
+
+			// If clicking already selected item, trigger connect (lazygit-style)
+			if wasAlreadySelected {
+				return a.connectToDiscoveredInstance(filteredDiscovered[i])
+			}
+			return a, nil
+		}
+	}
+
+	return a, nil
+}
+
+// connectToHistoryEntry connects using a history entry
+func (a *App) connectToHistoryEntry(entry models.ConnectionHistoryEntry) (tea.Model, tea.Cmd) {
+	var config models.ConnectionConfig
+
+	// Convert history entry to connection config WITH password from keyring
+	if a.connectionHistory != nil {
+		config = a.connectionHistory.GetConnectionConfigWithPassword(&entry)
+	} else {
+		config = entry.ToConnectionConfig()
+	}
+
+	return a.performConnection(config)
+}
+
+// connectToDiscoveredInstance connects using a discovered instance
+func (a *App) connectToDiscoveredInstance(instance models.DiscoveredInstance) (tea.Model, tea.Cmd) {
+	// Create connection config from discovered instance
+	config := models.ConnectionConfig{
+		Host:     instance.Host,
+		Port:     instance.Port,
+		Database: "postgres",        // Default database
+		User:     os.Getenv("USER"), // Current user
+		Password: "",                // No password for now
+		SSLMode:  "prefer",
+	}
+
+	return a.performConnection(config)
+}
+
+// performConnection executes the actual connection
+func (a *App) performConnection(config models.ConnectionConfig) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	connID, err := a.connectionManager.Connect(ctx, config)
+	if err != nil {
+		a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
+			config.Host, config.Port, err))
+		return a, nil
+	}
+
+	// Update active connection in state
+	conn, err := a.connectionManager.GetActive()
+	if err == nil && conn != nil {
+		a.state.ActiveConnection = &models.Connection{
+			ID:          connID,
+			Config:      config,
+			Connected:   conn.Connected,
+			ConnectedAt: conn.ConnectedAt,
+			LastPing:    conn.LastPing,
+			Error:       conn.Error,
+		}
+	}
+
+	// Save to connection history (ignore errors)
+	if a.connectionHistory != nil {
+		if err := a.connectionHistory.Add(config); err != nil {
+			log.Printf("Warning: Failed to save connection to history: %v", err)
+		} else {
+			// Reload history in dialog
+			history := a.connectionHistory.GetRecent(10)
+			a.connectionDialog.SetHistoryEntries(history)
+		}
+	}
+
+	// Trigger tree loading
+	a.showConnectionDialog = false
+	return a, func() tea.Msg {
+		return LoadTreeMsg{}
+	}
+}
+
+// handleTabClick handles clicking on result tabs
+// handleTabClick is no longer needed - using bubblezone for tab clicks
 
 // formatStatusBar formats a status bar with left and right aligned content
 func (a *App) formatStatusBar(left, right string) string {
@@ -2456,6 +2910,7 @@ func (a *App) loadTree() tea.Msg {
 						table.Name,
 					)
 					tableNode.Selectable = true
+					tableNode.Loaded = true // Mark as loaded so click triggers select, not expand
 					tablesGroup.AddChild(tableNode)
 				}
 				tablesGroup.Loaded = true
@@ -2478,6 +2933,7 @@ func (a *App) loadTree() tea.Msg {
 						view.Name,
 					)
 					viewNode.Selectable = true
+					viewNode.Loaded = true // Mark as loaded so click triggers select, not expand
 					viewsGroup.AddChild(viewNode)
 				}
 				viewsGroup.Loaded = true

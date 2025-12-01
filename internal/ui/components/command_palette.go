@@ -1,14 +1,21 @@
 package components
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/search"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+)
+
+// Zone ID prefixes for mouse click handling
+const (
+	ZoneCommandPaletteItemPrefix = "cmd-palette-item-"
 )
 
 // CloseCommandPaletteMsg is sent when the command palette should close
@@ -178,6 +185,96 @@ func (cp *CommandPalette) Update(msg tea.KeyMsg) (*CommandPalette, tea.Cmd) {
 		}
 		return cp, nil
 	}
+}
+
+// HandleMouseWheel handles mouse wheel events for scrolling
+// Returns true if the event was handled
+func (cp *CommandPalette) HandleMouseWheel(msg tea.MouseMsg) bool {
+	maxVisible := 8
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		// Scroll viewport up (like lazygit)
+		cp.ScrollOffset -= 3
+		if cp.ScrollOffset < 0 {
+			cp.ScrollOffset = 0
+		}
+		// Keep selection within visible range
+		if cp.Selected >= cp.ScrollOffset+maxVisible {
+			cp.Selected = cp.ScrollOffset + maxVisible - 1
+		}
+		if cp.Selected < cp.ScrollOffset {
+			cp.Selected = cp.ScrollOffset
+		}
+		return true
+	case tea.MouseButtonWheelDown:
+		// Scroll viewport down (like lazygit)
+		maxScrollOffset := len(cp.Filtered) - maxVisible
+		if maxScrollOffset < 0 {
+			maxScrollOffset = 0
+		}
+		cp.ScrollOffset += 3
+		if cp.ScrollOffset > maxScrollOffset {
+			cp.ScrollOffset = maxScrollOffset
+		}
+		// Keep selection within visible range
+		if cp.Selected < cp.ScrollOffset {
+			cp.Selected = cp.ScrollOffset
+		}
+		if cp.Selected >= cp.ScrollOffset+maxVisible {
+			cp.Selected = cp.ScrollOffset + maxVisible - 1
+		}
+		// Bounds check
+		if cp.Selected >= len(cp.Filtered) {
+			cp.Selected = len(cp.Filtered) - 1
+		}
+		if cp.Selected < 0 {
+			cp.Selected = 0
+		}
+		return true
+	}
+	return false
+}
+
+// HandleMouseClick handles mouse click events
+// Returns true if click was handled, and a command if an item was selected
+func (cp *CommandPalette) HandleMouseClick(msg tea.MouseMsg) (handled bool, cmd tea.Cmd) {
+	// Only handle left click press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return false, nil
+	}
+
+	// Check each visible item zone
+	maxResults := 8
+	startIdx := cp.ScrollOffset
+	endIdx := cp.ScrollOffset + maxResults
+	if endIdx > len(cp.Filtered) {
+		endIdx = len(cp.Filtered)
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		zoneID := fmt.Sprintf("%s%d", ZoneCommandPaletteItemPrefix, i)
+		if zone.Get(zoneID).InBounds(msg) {
+			// Double-click or click on already selected item executes
+			if i == cp.Selected {
+				if cp.Selected < len(cp.Filtered) {
+					cmdItem := cp.Filtered[cp.Selected]
+					if cmdItem.Action != nil {
+						return true, func() tea.Msg {
+							return cmdItem.Action()
+						}
+					}
+				}
+				return true, func() tea.Msg {
+					return CloseCommandPaletteMsg{}
+				}
+			}
+			// First click selects
+			cp.Selected = i
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // Filter filters commands based on input and mode, updates the filtered list
@@ -390,7 +487,9 @@ func (cp *CommandPalette) View() string {
 		}
 
 		line := lineStyle.Render(content)
-		results = append(results, line)
+		// Wrap with zone mark for mouse click detection
+		zoneID := fmt.Sprintf("%s%d", ZoneCommandPaletteItemPrefix, i)
+		results = append(results, zone.Mark(zoneID, line))
 	}
 
 	// Empty state
