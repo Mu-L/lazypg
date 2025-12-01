@@ -547,11 +547,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Get the active table view (Result Tabs or main TableView)
+		activeTable := a.getActiveTableView()
+
 		if msg.Mode == "local" {
 			// Local search - search only loaded data
-			a.tableView.SearchLocal(msg.Query)
+			if activeTable != nil {
+				activeTable.SearchLocal(msg.Query)
+			}
 		} else {
-			// Table search - query the database
+			// For Result Tabs, always use local search (data is already loaded)
+			if a.resultTabs.HasTabs() {
+				if activeTable != nil {
+					activeTable.SearchLocal(msg.Query)
+				}
+				return a, nil
+			}
+
+			// Table search - query the database (only for table browser)
 			if a.state.ActiveConnection == nil {
 				a.ShowError("No Connection", "Please connect to a database first")
 				return a, nil
