@@ -432,20 +432,25 @@ func (tv *TreeView) adjustScrollOffset(totalNodes, viewHeight int) {
 
 // addScrollIndicators adds visual indicators for scrollable content
 func (tv *TreeView) addScrollIndicators(content string, startIdx, endIdx, total int) string {
-	// This is a simple implementation - could be enhanced with actual scroll bar
 	lines := strings.Split(content, "\n")
 
-	if startIdx > 0 && len(lines) > 0 {
-		// Add up arrow indicator
-		indicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render("↑")
-		lines[0] = indicator + " " + lines[0][2:]
+	// Build scroll status indicator (e.g., "↑3 ↓5" meaning 3 above, 5 below)
+	var indicators []string
+	if startIdx > 0 {
+		upIndicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render(fmt.Sprintf("↑%d", startIdx))
+		indicators = append(indicators, upIndicator)
+	}
+	if endIdx < total {
+		remaining := total - endIdx
+		downIndicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render(fmt.Sprintf("↓%d", remaining))
+		indicators = append(indicators, downIndicator)
 	}
 
-	if endIdx < total && len(lines) > 0 {
-		// Add down arrow indicator
+	// Append indicator to the last line if there's any scroll info
+	if len(indicators) > 0 && len(lines) > 0 {
 		lastIdx := len(lines) - 1
-		indicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render("↓")
-		lines[lastIdx] = indicator + " " + lines[lastIdx][2:]
+		indicatorText := strings.Join(indicators, " ")
+		lines[lastIdx] = lines[lastIdx] + "  " + indicatorText
 	}
 
 	return strings.Join(lines, "\n")
