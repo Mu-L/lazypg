@@ -25,12 +25,14 @@ var (
 
 // ResultTab represents a single query result tab
 type ResultTab struct {
-	ID        int
-	Title     string
-	SQL       string
-	Result    models.QueryResult
-	CreatedAt time.Time
-	TableView *TableView
+	ID          int
+	Title       string
+	SQL         string
+	Result      models.QueryResult
+	CreatedAt   time.Time
+	TableView   *TableView
+	IsPending   bool // true if query is still executing
+	IsCancelled bool // true if query was cancelled
 }
 
 // ResultTabs manages multiple query result tabs
@@ -39,6 +41,10 @@ type ResultTabs struct {
 	activeIdx int
 	nextID    int
 	Theme     theme.Theme
+
+	// Pending execution state
+	pendingSQL       string
+	pendingStartTime time.Time
 }
 
 // NewResultTabs creates a new result tabs manager
@@ -49,6 +55,86 @@ func NewResultTabs(th theme.Theme) *ResultTabs {
 		nextID:    1,
 		Theme:     th,
 	}
+}
+
+// StartPendingQuery creates a pending tab for an executing query
+func (rt *ResultTabs) StartPendingQuery(sql string) {
+	rt.pendingSQL = sql
+	rt.pendingStartTime = time.Now()
+
+	// Create pending tab
+	tab := &ResultTab{
+		ID:        rt.nextID,
+		Title:     "Executing...",
+		SQL:       sql,
+		CreatedAt: time.Now(),
+		IsPending: true,
+	}
+	rt.nextID++
+
+	// Insert pending tab at the beginning (leftmost position)
+	rt.tabs = append([]*ResultTab{tab}, rt.tabs...)
+
+	// Remove oldest (rightmost) if exceeding max
+	if len(rt.tabs) > MaxResultTabs {
+		rt.tabs = rt.tabs[:MaxResultTabs]
+	}
+
+	// Set pending tab as active
+	rt.activeIdx = 0
+}
+
+// CompletePendingQuery completes the pending query with results
+func (rt *ResultTabs) CompletePendingQuery(sql string, result models.QueryResult) {
+	// Find and update the pending tab
+	for i, tab := range rt.tabs {
+		if tab.IsPending && tab.SQL == sql {
+			// Create TableView for results
+			tableView := NewTableView(rt.Theme)
+			tableView.SetData(result.Columns, result.Rows, len(result.Rows))
+
+			tab.Title = rt.generateTitle(sql, result)
+			tab.Result = result
+			tab.TableView = tableView
+			tab.IsPending = false
+
+			// Make sure this tab is active
+			rt.activeIdx = i
+			break
+		}
+	}
+
+	// Clear pending state
+	rt.pendingSQL = ""
+}
+
+// CancelPendingQuery marks the pending tab as cancelled
+func (rt *ResultTabs) CancelPendingQuery() {
+	// Find and mark the pending tab as cancelled
+	for _, tab := range rt.tabs {
+		if tab.IsPending {
+			tab.IsPending = false
+			tab.IsCancelled = true
+			tab.Title = "Cancelled"
+			break
+		}
+	}
+
+	// Clear pending state
+	rt.pendingSQL = ""
+}
+
+// HasPendingQuery returns true if there's a pending query
+func (rt *ResultTabs) HasPendingQuery() bool {
+	return rt.pendingSQL != ""
+}
+
+// GetPendingElapsed returns the elapsed time for the pending query
+func (rt *ResultTabs) GetPendingElapsed() time.Duration {
+	if rt.pendingSQL == "" {
+		return 0
+	}
+	return time.Since(rt.pendingStartTime)
 }
 
 // AddResult adds a new query result as a tab (newest appears on the left)

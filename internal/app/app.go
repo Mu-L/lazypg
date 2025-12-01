@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -96,6 +97,10 @@ type App struct {
 	// Search input
 	showSearch  bool
 	searchInput *components.SearchInput
+
+	// Query execution state
+	executeCancelFn context.CancelFunc
+	executeSpinner  spinner.Model
 }
 
 
@@ -216,6 +221,11 @@ func New(cfg *config.Config) *App {
 	// Initialize search input
 	searchInput := components.NewSearchInput(th)
 
+	// Initialize spinner for query execution
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(th.Info)
+
 	app := &App{
 		state:             state,
 		config:            cfg,
@@ -245,6 +255,7 @@ func New(cfg *config.Config) *App {
 		connectionHistory: connectionHistory,
 		showSearch:        false,
 		searchInput:       searchInput,
+		executeSpinner:    s,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -286,6 +297,15 @@ func (a *App) Init() tea.Cmd {
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		// Update spinner when there's a pending query
+		if a.resultTabs.HasPendingQuery() {
+			var cmd tea.Cmd
+			a.executeSpinner, cmd = a.executeSpinner.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
 	case commands.ConnectCommandMsg:
 		// Handle connect command from palette
 		a.showConnectionDialog = true
@@ -373,32 +393,51 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case components.ExecuteQueryMsg:
-		// Handle query execution from quick query
+		// Handle query execution from SQL editor
 		if a.state.ActiveConnection == nil {
 			a.ShowError("No Connection", "Please connect to a database first")
 			return a, nil
 		}
 
-		// Execute query asynchronously
-		return a, func() tea.Msg {
-			conn, err := a.connectionManager.GetActive()
-			if err != nil {
-				return QueryResultMsg{
-					SQL: msg.SQL,
-					Result: models.QueryResult{
-						Error: fmt.Errorf("failed to get connection: %w", err),
-					},
-				}
-			}
+		// Create pending tab immediately
+		a.resultTabs.StartPendingQuery(msg.SQL)
 
-			result := query.Execute(context.Background(), conn.Pool.GetPool(), msg.SQL)
-			return QueryResultMsg{
-				SQL:    msg.SQL,
-				Result: result,
-			}
-		}
+		// Immediately switch focus to data panel and collapse editor
+		a.sqlEditor.Collapse()
+		a.sqlEditorFocused = false
+		a.state.FocusedPanel = models.RightPanel
+		a.updatePanelStyles()
+
+		// Create cancellable context for query execution
+		ctx, cancel := context.WithCancel(context.Background())
+		a.executeCancelFn = cancel
+
+		// Execute query asynchronously and start spinner
+		return a, tea.Batch(
+			a.executeSpinner.Tick,
+			func() tea.Msg {
+				conn, err := a.connectionManager.GetActive()
+				if err != nil {
+					return QueryResultMsg{
+						SQL: msg.SQL,
+						Result: models.QueryResult{
+							Error: fmt.Errorf("failed to get connection: %w", err),
+						},
+					}
+				}
+
+				result := query.Execute(ctx, conn.Pool.GetPool(), msg.SQL)
+				return QueryResultMsg{
+					SQL:    msg.SQL,
+					Result: result,
+				}
+			},
+		)
 
 	case QueryResultMsg:
+		// Clear execution state
+		a.executeCancelFn = nil
+
 		// Record query to history
 		if a.historyStore != nil {
 			connName := ""
@@ -427,20 +466,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle query result
 		if msg.Result.Error != nil {
+			// Check if it was cancelled (context cancelled error)
+			if msg.Result.Error.Error() == "context canceled" {
+				// Already handled by CancelPendingQuery, just return
+				return a, nil
+			}
+			// Show error and remove pending tab
+			a.resultTabs.CancelPendingQuery()
 			a.ShowError("Query Error", msg.Result.Error.Error())
 			return a, nil
 		}
 
-		// Add result to result tabs
-		a.resultTabs.AddResult(msg.SQL, msg.Result)
-
-		// Collapse the SQL editor after successful execution
-		a.sqlEditor.Collapse()
-		a.sqlEditorFocused = false
-
-		// Focus the data panel
-		a.state.FocusedPanel = models.RightPanel
-		a.updatePanelStyles()
+		// Complete the pending query with results
+		a.resultTabs.CompletePendingQuery(msg.SQL, msg.Result)
 
 		return a, nil
 
@@ -786,6 +824,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.state.ViewMode = models.HelpMode
 			}
 		case "esc":
+			// Cancel executing query first
+			if a.resultTabs.HasPendingQuery() && a.executeCancelFn != nil {
+				a.executeCancelFn()
+				a.executeCancelFn = nil
+				a.resultTabs.CancelPendingQuery()
+				return a, nil
+			}
 			// Exit help mode
 			if a.state.ViewMode == models.HelpMode {
 				a.state.ViewMode = models.NormalMode
@@ -1625,13 +1670,62 @@ func (a *App) renderRightPanel(width, height int) string {
 
 // renderDataPanel renders the data panel (table view or structure view)
 func (a *App) renderDataPanel(width, height int) string {
-	// If we have result tabs, show the active tab's table view
+	// If we have result tabs, show the active tab's content
 	if a.resultTabs.HasTabs() {
-		activeTable := a.resultTabs.GetActiveTableView()
-		if activeTable != nil {
-			activeTable.Width = width
-			activeTable.Height = height
-			return activeTable.View()
+		activeTab := a.resultTabs.GetActiveTab()
+		if activeTab != nil {
+			// If active tab is pending, show spinner
+			if activeTab.IsPending {
+				elapsed := a.resultTabs.GetPendingElapsed()
+				elapsedStr := fmt.Sprintf("%.1fs", elapsed.Seconds())
+
+				spinnerView := a.executeSpinner.View()
+				statusText := lipgloss.NewStyle().
+					Foreground(a.theme.Foreground).
+					Render(fmt.Sprintf("Executing query... (%s)", elapsedStr))
+
+				cancelHint := lipgloss.NewStyle().
+					Foreground(a.theme.Border).
+					Render("Press Esc to cancel")
+
+				content := lipgloss.JoinVertical(lipgloss.Center,
+					"",
+					spinnerView+" "+statusText,
+					"",
+					cancelHint,
+				)
+
+				return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+			}
+
+			// If active tab was cancelled, show cancelled message
+			if activeTab.IsCancelled {
+				cancelledText := lipgloss.NewStyle().
+					Foreground(a.theme.Warning).
+					Bold(true).
+					Render("Query Cancelled")
+
+				hintText := lipgloss.NewStyle().
+					Foreground(a.theme.Border).
+					Render("Press Ctrl+E to edit and re-execute")
+
+				content := lipgloss.JoinVertical(lipgloss.Center,
+					"",
+					cancelledText,
+					"",
+					hintText,
+				)
+
+				return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+			}
+
+			// Show active tab's table view
+			activeTable := a.resultTabs.GetActiveTableView()
+			if activeTable != nil {
+				activeTable.Width = width
+				activeTable.Height = height
+				return activeTable.View()
+			}
 		}
 	}
 
