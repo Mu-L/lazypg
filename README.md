@@ -1,9 +1,8 @@
 # lazypg
 
-<!-- TODO: Add logo here -->
-<!-- <p align="center">
+<p align="center">
   <img src="assets/logo.png" alt="lazypg logo" width="400">
-</p> -->
+</p>
 
 <p align="center">
   <strong>A simple terminal UI for PostgreSQL, written in Go with the <a href="https://github.com/charmbracelet/bubbletea">Bubble Tea</a> framework.</strong>
@@ -39,10 +38,9 @@ If you're anything like me, you love PostgreSQL but hate context-switching betwe
 
 That's lazypg. Inspired by [lazygit](https://github.com/jesseduffield/lazygit), built for developers who live in the terminal.
 
-<!-- TODO: Add main demo GIF -->
-<!-- <p align="center">
+<p align="center">
   <img src="assets/demo.gif" alt="lazypg demo" width="800">
-</p> -->
+</p>
 
 ## Features
 
@@ -50,36 +48,31 @@ That's lazypg. Inspired by [lazygit](https://github.com/jesseduffield/lazygit), 
 
 Browse your databases, schemas, and tables with a familiar tree structure. Expand, collapse, and jump around with keyboard shortcuts you already know.
 
-<!-- TODO: Add navigation GIF -->
-<!-- ![Navigation](assets/navigation.gif) -->
+![Navigation](assets/navigation.gif)
 
-### Interactive Filtering
+### Quick Search
 
-Build complex WHERE clauses visually. No more hand-typing SQL for simple filters — just press `f`, pick your column, choose an operator, and go.
+Filter table rows instantly with `/`. Type your search term and watch results update in real-time — simple, fast, and familiar.
 
-<!-- TODO: Add filtering GIF -->
-<!-- ![Filtering](assets/filtering.gif) -->
+![Filtering](assets/filtering.gif)
 
 ### JSONB Viewer
 
 JSONB columns are first-class citizens. View them formatted, navigate as a tree, or get ready-to-use query snippets.
 
-<!-- TODO: Add JSONB GIF -->
-<!-- ![JSONB Viewer](assets/jsonb.gif) -->
+![JSONB Viewer](assets/jsonb.gif)
 
 ### Command Palette
 
 Quick access to everything via `Ctrl+K`. Search commands, jump to tables, or access recent queries — all without leaving the keyboard.
 
-<!-- TODO: Add command palette GIF -->
-<!-- ![Command Palette](assets/command-palette.gif) -->
+![Command Palette](assets/command-palette.gif)
 
 ### SQL Editor
 
 Write and execute SQL directly. Results appear in tabs, so you can run multiple queries and compare results.
 
-<!-- TODO: Add SQL editor GIF -->
-<!-- ![SQL Editor](assets/sql-editor.gif) -->
+![SQL Editor](assets/sql-editor.gif)
 
 ### And More...
 
@@ -139,8 +132,8 @@ make build
    - Press `Enter` to expand nodes or select tables
    - Press `Tab` to switch between panels
 
-4. **Filter and explore**
-   - Press `f` to open the filter builder
+4. **Search and explore**
+   - Press `/` to search and filter rows
    - Press `j` on a JSONB cell to open the viewer
    - Press `Ctrl+K` to open the command palette
 
@@ -173,9 +166,8 @@ make build
 
 | Key | Action |
 |-----|--------|
-| `f` | Open filter builder |
-| `Ctrl+F` | Quick filter from cell |
-| `Ctrl+R` | Clear filters |
+| `/` | Search and filter rows |
+| `Esc` | Clear search |
 | `j` | Open JSONB viewer (on JSONB cell) |
 | `p` | Toggle preview pane |
 | `s` | Sort by column |
@@ -193,44 +185,30 @@ make build
 
 lazypg stores configuration in `~/.config/lazypg/`:
 
-### Main Config (`config.yaml`)
+| File | Purpose |
+|------|---------|
+| `config.yaml` | UI and behavior settings |
+| `connection_history.yaml` | Recent connections (auto-saved) |
+| `favorites.yaml` | Saved SQL queries |
+
+### Example Config (`config.yaml`)
 
 ```yaml
 ui:
-  theme: "default"          # Color theme
-  panel_width_ratio: 25     # Left panel width percentage
-  mouse_enabled: true       # Enable mouse support
+  theme: "default"
+  mouse_enabled: true
+  panel_width_ratio: 25
 
-editor:
-  external: "vim"           # External editor for Ctrl+O
-```
+general:
+  default_limit: 100
 
-### Saved Connections (`connections.yaml`)
-
-```yaml
-connections:
-  - name: "Local Dev"
-    host: localhost
-    port: 5432
-    database: mydb
-    user: postgres
-    ssl_mode: prefer
-
-  - name: "Production (readonly)"
-    host: prod-db.example.com
-    port: 5432
-    database: prod
-    user: readonly_user
-    ssl_mode: require
+performance:
+  query_timeout: 30000
 ```
 
 ## Documentation
 
-- [Documentation Index](docs/INDEX.md) — Full documentation
-- [Filtering Guide](docs/features/filtering.md) — Interactive filter builder
-- [JSONB Support](docs/features/jsonb.md) — Working with JSONB data
-- [Query Favorites](docs/features/favorites.md) — Save and manage queries
-- [Development Guide](docs/DEVELOPMENT.md) — Contributing to lazypg
+- [User Guide](docs/USER_GUIDE.md) — Complete usage guide
 - [Roadmap](docs/ROADMAP.md) — Planned features
 
 ## Contributing
