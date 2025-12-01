@@ -252,6 +252,16 @@ make fmt      # Format code
 
 Please read [DEVELOPMENT.md](docs/DEVELOPMENT.md) before submitting a PR.
 
+## Star History
+
+<a href="https://star-history.com/#rebeliceyang/lazypg&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date" />
+ </picture>
+</a>
+
 ## Acknowledgments
 
 lazypg wouldn't exist without these amazing projects:
