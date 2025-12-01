@@ -4,7 +4,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // ParseEnvironment reads PostgreSQL environment variables

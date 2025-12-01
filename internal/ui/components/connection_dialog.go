@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
-	"github.com/rebeliceyang/lazypg/internal/models"
-	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+	"github.com/rebelice/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/ui/theme"
 )
 
 // ConnectionDialog represents a connection dialog

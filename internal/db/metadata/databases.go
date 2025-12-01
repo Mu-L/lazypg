@@ -3,7 +3,7 @@ package metadata
 import (
 	"context"
 
-	"github.com/rebeliceyang/lazypg/internal/db/connection"
+	"github.com/rebelice/lazypg/internal/db/connection"
 )
 
 // Database represents a PostgreSQL database

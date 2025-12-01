@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // Registry manages available commands

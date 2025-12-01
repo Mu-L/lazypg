@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rebeliceyang/lazypg/internal/db/connection"
+	"github.com/rebelice/lazypg/internal/db/connection"
 )
 
 // TableData represents paginated table data

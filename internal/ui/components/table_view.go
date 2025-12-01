@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/mattn/go-runewidth"
-	"github.com/rebeliceyang/lazypg/internal/jsonb"
-	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+	"github.com/rebelice/lazypg/internal/jsonb"
+	"github.com/rebelice/lazypg/internal/ui/theme"
 )
 
 // Zone ID prefixes for mouse click handling

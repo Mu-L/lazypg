@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // DefaultPorts are the default PostgreSQL ports to scan

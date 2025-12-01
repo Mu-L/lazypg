@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // Builder generates SQL WHERE clauses from Filter models

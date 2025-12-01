@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 	"gopkg.in/yaml.v3"
 )
 

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
-	"github.com/rebeliceyang/lazypg/internal/models"
-	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+	"github.com/rebelice/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/ui/theme"
 )
 
 func init() {

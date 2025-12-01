@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rebeliceyang/lazypg/releases"><img src="https://img.shields.io/github/v/release/rebeliceyang/lazypg?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/rebeliceyang/lazypg/actions"><img src="https://img.shields.io/github/actions/workflow/status/rebeliceyang/lazypg/ci.yml?branch=main&style=flat-square" alt="Build Status"></a>
-  <a href="https://github.com/rebeliceyang/lazypg/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rebeliceyang/lazypg?style=flat-square" alt="License"></a>
-  <a href="https://goreportcard.com/report/github.com/rebeliceyang/lazypg"><img src="https://goreportcard.com/badge/github.com/rebeliceyang/lazypg?style=flat-square" alt="Go Report Card"></a>
+  <a href="https://github.com/rebelice/lazypg/releases"><img src="https://img.shields.io/github/v/release/rebelice/lazypg?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/rebelice/lazypg/actions"><img src="https://img.shields.io/github/actions/workflow/status/rebelice/lazypg/ci.yml?branch=main&style=flat-square" alt="Build Status"></a>
+  <a href="https://github.com/rebelice/lazypg/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rebelice/lazypg?style=flat-square" alt="License"></a>
+  <a href="https://goreportcard.com/report/github.com/rebelice/lazypg"><img src="https://goreportcard.com/badge/github.com/rebelice/lazypg?style=flat-square" alt="Go Report Card"></a>
 </p>
 
 <p align="center">
@@ -88,23 +88,23 @@ Write and execute SQL directly. Results appear in tabs, so you can run multiple 
 
 ```bash
 # Coming soon
-brew install rebeliceyang/tap/lazypg
+brew install rebelice/tap/lazypg
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/rebeliceyang/lazypg@latest
+go install github.com/rebelice/lazypg@latest
 ```
 
 ### Download Binary
 
-Download the latest release from the [Releases page](https://github.com/rebeliceyang/lazypg/releases).
+Download the latest release from the [Releases page](https://github.com/rebelice/lazypg/releases).
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/rebeliceyang/lazypg.git
+git clone https://github.com/rebelice/lazypg.git
 cd lazypg
 make build
 ./bin/lazypg
@@ -217,7 +217,7 @@ Contributions are welcome! Whether it's bug reports, feature requests, or pull r
 
 ```bash
 # Setup
-git clone https://github.com/rebeliceyang/lazypg.git
+git clone https://github.com/rebelice/lazypg.git
 cd lazypg
 make deps
 
@@ -232,11 +232,11 @@ Please read [DEVELOPMENT.md](docs/DEVELOPMENT.md) before submitting a PR.
 
 ## Star History
 
-<a href="https://star-history.com/#rebeliceyang/lazypg&Date">
+<a href="https://star-history.com/#rebelice/lazypg&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rebeliceyang/lazypg&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rebelice/lazypg&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rebelice/lazypg&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rebelice/lazypg&type=Date" />
  </picture>
 </a>
 

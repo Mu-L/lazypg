@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rebeliceyang/lazypg/internal/ui/theme"
+	"github.com/rebelice/lazypg/internal/ui/theme"
 )
 
 // SearchInputMsg is sent when search should be executed

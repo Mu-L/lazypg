@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rebeliceyang/lazypg/internal/db/connection"
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/db/connection"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // GetColumnDetails retrieves detailed column information including constraints

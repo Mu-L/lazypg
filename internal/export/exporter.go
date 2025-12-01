@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // ExportToCSV exports favorites to a CSV file

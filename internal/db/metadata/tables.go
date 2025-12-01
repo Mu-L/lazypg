@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rebeliceyang/lazypg/internal/db/connection"
+	"github.com/rebelice/lazypg/internal/db/connection"
 )
 
 // toString safely converts an interface{} to string

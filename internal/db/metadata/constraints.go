@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/rebeliceyang/lazypg/internal/db/connection"
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/db/connection"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // GetConstraints retrieves all constraints for a table

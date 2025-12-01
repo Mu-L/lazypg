@@ -1,4 +1,4 @@
-module github.com/rebeliceyang/lazypg
+module github.com/rebelice/lazypg
 
 go 1.25.1
 

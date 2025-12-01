@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // Manager manages multiple database connections

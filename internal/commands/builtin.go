@@ -2,7 +2,7 @@ package commands
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rebeliceyang/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // Command messages
