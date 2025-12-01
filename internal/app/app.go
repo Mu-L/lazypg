@@ -102,6 +102,58 @@ type App struct {
 	// Query execution state
 	executeCancelFn context.CancelFunc
 	executeSpinner  spinner.Model
+
+	// Cached styles for performance (avoid recreating on every render)
+	cachedStyles *appStyles
+}
+
+// appStyles holds pre-computed styles for App rendering
+type appStyles struct {
+	appName        lipgloss.Style
+	connGreen      lipgloss.Style
+	connGray       lipgloss.Style
+	connText       lipgloss.Style
+	topBarHelp     lipgloss.Style
+	topBarHelpText lipgloss.Style
+	keyStyle       lipgloss.Style
+	dimStyle       lipgloss.Style
+	separatorStyle lipgloss.Style
+	filterStyle    lipgloss.Style
+	vimStyle       lipgloss.Style
+	overlayBg      lipgloss.Color
+}
+
+// initAppStyles initializes cached styles for App rendering
+func (a *App) initAppStyles() {
+	a.cachedStyles = &appStyles{
+		appName: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#cba6f7")). // Mauve
+			Background(lipgloss.Color("#313244")), // Surface0
+		connGreen: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6e3a1")), // Green
+		connGray: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")), // Overlay0
+		connText: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#cdd6f4")), // Text
+		topBarHelp: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#89b4fa")), // Blue
+		topBarHelpText: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")), // Overlay0
+		keyStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#89b4fa")). // Blue for keys
+			Bold(true),
+		dimStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6c7086")), // Overlay0 for descriptions
+		separatorStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#45475a")), // Surface1 for separators
+		filterStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f9e2af")), // Yellow for filter
+		vimStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6e3a1")). // Green for vim input
+			Bold(true),
+		overlayBg: lipgloss.Color("#555555"),
+	}
 }
 
 
@@ -272,6 +324,9 @@ func New(cfg *config.Config) *App {
 	// Set initial panel dimensions and styles
 	app.updatePanelDimensions()
 	app.updatePanelStyles()
+
+	// Initialize cached styles for performance
+	app.initAppStyles()
 
 	return app
 }
@@ -1399,13 +1454,10 @@ func (a *App) View() string {
 
 // renderNormalView renders the normal application view
 func (a *App) renderNormalView() string {
+	// Use cached styles for performance
+	styles := a.cachedStyles
 
 	// Top bar with modern Catppuccin styling
-	appNameStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#cba6f7")). // Mauve
-		Background(lipgloss.Color("#313244"))   // Surface0
-
 	connStatus := ""
 	if a.state.ActiveConnection != nil {
 		// Build connection string with elegant formatting
@@ -1416,74 +1468,50 @@ func (a *App) renderNormalView() string {
 			conn.Config.Port,
 			conn.Config.Database)
 
-		connStatus = "  " + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#a6e3a1")). // Green
-			Render("") + " " +
-			lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#cdd6f4")). // Text
-			Render(connStr)
+		connStatus = "  " + styles.connGreen.Render("") + " " + styles.connText.Render(connStr)
 	} else {
-		connStatus = "  " + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6c7086")). // Overlay0
-			Render("") + " " +
-			lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6c7086")).
-			Render("Not connected")
+		connStatus = "  " + styles.connGray.Render("") + " " + styles.connGray.Render("Not connected")
 	}
 
-	topBarLeft := appNameStyle.Render("  LazyPG ") + connStatus
-	topBarRight := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#89b4fa")). // Blue
-		Render("? ") +
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6c7086")).
-			Render("help")
+	topBarLeft := styles.appName.Render("  LazyPG ") + connStatus
+	topBarRight := styles.topBarHelp.Render("? ") + styles.topBarHelpText.Render("help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	// Create modern top bar with subtle border
-	topBarStyle := lipgloss.NewStyle().
+	// Create modern top bar with subtle border (width needs to be dynamic)
+	topBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("#313244")). // Surface0
-		Foreground(lipgloss.Color("#cdd6f4")). // Text
+		Background(lipgloss.Color("#313244")).
+		Foreground(lipgloss.Color("#cdd6f4")).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")). // Surface1
-		Padding(0, 1)
+		BorderForeground(lipgloss.Color("#45475a")).
+		Padding(0, 1).
+		Render(topBarContent)
 
-	topBar := topBarStyle.Render(topBarContent)
-
-	// Context-sensitive bottom bar with modern styling
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#89b4fa")). // Blue for keys
-		Bold(true)
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c7086")) // Overlay0 for descriptions
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#45475a")) // Surface1 for separators
-
+	// Context-sensitive bottom bar with cached styles
 	var bottomBarLeft string
 	if a.sqlEditorFocused {
 		// SQL editor mode
-		bottomBarLeft = keyStyle.Render("Ctrl+S") + dimStyle.Render(" execute") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("Ctrl+O") + dimStyle.Render(" editor") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("Esc") + dimStyle.Render(" close")
+		bottomBarLeft = styles.keyStyle.Render("Ctrl+S") + styles.dimStyle.Render(" execute") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Ctrl+O") + styles.dimStyle.Render(" editor") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Esc") + styles.dimStyle.Render(" close")
 	} else if a.state.FocusedPanel == models.LeftPanel {
 		// Tree navigation keys with icons
-		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("→←") + dimStyle.Render(" expand") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("Enter") + dimStyle.Render(" select")
+		bottomBarLeft = styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("→←") + styles.dimStyle.Render(" expand") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Enter") + styles.dimStyle.Render(" select")
 	} else {
 		// Data panel - include SQL editor shortcut
-		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("Ctrl+E") + dimStyle.Render(" sql") +
-			separatorStyle.Render(" │ ") +
-			keyStyle.Render("p") + dimStyle.Render(" preview")
+		bottomBarLeft = styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Ctrl+D/U") + styles.dimStyle.Render(" page") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Ctrl+E") + styles.dimStyle.Render(" sql") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("p") + styles.dimStyle.Render(" preview")
 	}
 
 	// Add filter indicator if active
@@ -1493,10 +1521,8 @@ func (a *App) renderNormalView() string {
 		if filterCount > 1 {
 			filterSuffix = "s"
 		}
-		filterStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f9e2af")) // Yellow for filter
-		filterIndicator := separatorStyle.Render(" │ ") +
-			filterStyle.Render("") + dimStyle.Render(fmt.Sprintf(" %d filter%s", filterCount, filterSuffix))
+		filterIndicator := styles.separatorStyle.Render(" │ ") +
+			styles.filterStyle.Render("") + styles.dimStyle.Render(fmt.Sprintf(" %d filter%s", filterCount, filterSuffix))
 		bottomBarLeft = bottomBarLeft + filterIndicator
 	}
 
@@ -1504,34 +1530,30 @@ func (a *App) renderNormalView() string {
 	if a.state.FocusedPanel == models.RightPanel && a.currentTab == 0 {
 		vimStatus := a.tableView.GetVimMotionStatus()
 		if vimStatus != "" {
-			vimStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a6e3a1")). // Green for vim input
-				Bold(true)
-			bottomBarLeft = bottomBarLeft + separatorStyle.Render(" │ ") + vimStyle.Render(vimStatus)
+			bottomBarLeft = bottomBarLeft + styles.separatorStyle.Render(" │ ") + styles.vimStyle.Render(vimStatus)
 		}
 	}
 
 	// Common keys on the right with icons
-	bottomBarRight := keyStyle.Render("Tab") + dimStyle.Render(" switch") +
-		separatorStyle.Render(" │ ") +
-		keyStyle.Render("[]") + dimStyle.Render(" tabs") +
-		separatorStyle.Render(" │ ") +
-		keyStyle.Render("c") + dimStyle.Render(" connect") +
-		separatorStyle.Render(" │ ") +
-		keyStyle.Render("q") + dimStyle.Render(" quit")
+	bottomBarRight := styles.keyStyle.Render("Tab") + styles.dimStyle.Render(" switch") +
+		styles.separatorStyle.Render(" │ ") +
+		styles.keyStyle.Render("[]") + styles.dimStyle.Render(" tabs") +
+		styles.separatorStyle.Render(" │ ") +
+		styles.keyStyle.Render("c") + styles.dimStyle.Render(" connect") +
+		styles.separatorStyle.Render(" │ ") +
+		styles.keyStyle.Render("q") + styles.dimStyle.Render(" quit")
 
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	// Create modern bottom bar
-	bottomBarStyle := lipgloss.NewStyle().
+	// Create modern bottom bar (width needs to be dynamic)
+	bottomBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("#313244")). // Surface0
-		Foreground(lipgloss.Color("#cdd6f4")). // Text
+		Background(lipgloss.Color("#313244")).
+		Foreground(lipgloss.Color("#cdd6f4")).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475a")). // Surface1
-		Padding(0, 1)
-
-	bottomBar := bottomBarStyle.Render(bottomBarContent)
+		BorderForeground(lipgloss.Color("#45475a")).
+		Padding(0, 1).
+		Render(bottomBarContent)
 
 	// Update tree view dimensions and render
 	// Calculate available content height: panel height - borders (2) - title line (1) - padding (0)
