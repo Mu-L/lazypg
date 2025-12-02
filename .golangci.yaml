@@ -1,0 +1,23 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-QF1003"
+        - "-ST1005"
+        - "-ST1000"
+        - "-ST1020"
+        - "-ST1021"
+        - "-ST1022"
+        - "-ST1003"
