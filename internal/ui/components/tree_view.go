@@ -102,22 +102,29 @@ func (tv *TreeView) View() string {
 	}
 
 	// Calculate viewport dimensions
-	// Height is already the content area height from the panel
-	// Just use it directly, no need to subtract anything
 	viewHeight := tv.Height
 	if viewHeight < 1 {
 		viewHeight = 1
 	}
 
-	// Auto-scroll to keep cursor visible
-	tv.adjustScrollOffset(len(visibleNodes), viewHeight)
+	// Check if we need scroll indicators (content exceeds viewHeight)
+	needsScrollIndicator := len(visibleNodes) > viewHeight
+
+	// Reserve one line for scroll indicator if needed
+	nodeViewHeight := viewHeight
+	if needsScrollIndicator && viewHeight > 1 {
+		nodeViewHeight = viewHeight - 1
+	}
+
+	// Auto-scroll to keep cursor visible (use nodeViewHeight for proper scrolling)
+	tv.adjustScrollOffset(len(visibleNodes), nodeViewHeight)
 
 	// Build the tree view
 	var lines []string
 
-	// Calculate visible range
+	// Calculate visible range (based on nodeViewHeight, not full viewHeight)
 	startIdx := tv.ScrollOffset
-	endIdx := tv.ScrollOffset + viewHeight
+	endIdx := tv.ScrollOffset + nodeViewHeight
 	if endIdx > len(visibleNodes) {
 		endIdx = len(visibleNodes)
 	}
@@ -132,20 +139,18 @@ func (tv *TreeView) View() string {
 		lines = append(lines, zone.Mark(zoneID, line))
 	}
 
-	// Fill remaining space if needed
+	// Add scroll indicator line if needed
+	if needsScrollIndicator {
+		indicatorLine := tv.renderScrollIndicator(startIdx, endIdx, len(visibleNodes))
+		lines = append(lines, indicatorLine)
+	}
+
+	// Fill remaining space if needed (in case we have fewer nodes than viewHeight)
 	for len(lines) < viewHeight {
 		lines = append(lines, "")
 	}
 
-	// Join lines
-	content := strings.Join(lines, "\n")
-
-	// Add scroll indicators if needed
-	if tv.ScrollOffset > 0 || endIdx < len(visibleNodes) {
-		content = tv.addScrollIndicators(content, startIdx, endIdx, len(visibleNodes))
-	}
-
-	return content
+	return strings.Join(lines, "\n")
 }
 
 // Update handles keyboard input for tree navigation
@@ -514,30 +519,27 @@ func (tv *TreeView) adjustScrollOffset(totalNodes, viewHeight int) {
 	}
 }
 
-// addScrollIndicators adds visual indicators for scrollable content
-func (tv *TreeView) addScrollIndicators(content string, startIdx, endIdx, total int) string {
-	lines := strings.Split(content, "\n")
-
+// renderScrollIndicator renders a scroll indicator line showing items above/below
+func (tv *TreeView) renderScrollIndicator(startIdx, endIdx, total int) string {
 	// Build scroll status indicator (e.g., "↑3 ↓5" meaning 3 above, 5 below)
 	var indicators []string
 	if startIdx > 0 {
-		upIndicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render(fmt.Sprintf("↑%d", startIdx))
-		indicators = append(indicators, upIndicator)
+		indicators = append(indicators, fmt.Sprintf("↑%d", startIdx))
 	}
 	if endIdx < total {
 		remaining := total - endIdx
-		downIndicator := lipgloss.NewStyle().Foreground(tv.Theme.Info).Render(fmt.Sprintf("↓%d", remaining))
-		indicators = append(indicators, downIndicator)
+		indicators = append(indicators, fmt.Sprintf("↓%d", remaining))
 	}
 
-	// Append indicator to the last line if there's any scroll info
-	if len(indicators) > 0 && len(lines) > 0 {
-		lastIdx := len(lines) - 1
-		indicatorText := strings.Join(indicators, " ")
-		lines[lastIdx] = lines[lastIdx] + "  " + indicatorText
-	}
+	indicatorText := strings.Join(indicators, " ")
 
-	return strings.Join(lines, "\n")
+	// Style and right-align the indicator
+	maxWidth := tv.Width - 2 // Same as used in renderNode
+	return lipgloss.NewStyle().
+		Foreground(tv.Theme.Info).
+		Width(maxWidth).
+		Align(lipgloss.Right).
+		Render(indicatorText)
 }
 
 // emptyState returns the empty state view
