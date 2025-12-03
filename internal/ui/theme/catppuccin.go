@@ -58,6 +58,16 @@ func CatppuccinMochaTheme() Theme {
 		Metadata:         lipgloss.Color("#6c7086"), // Overlay0 - metadata text
 		PrimaryKey:       lipgloss.Color("#f9e2af"), // Yellow - PK indicator
 		ForeignKey:       lipgloss.Color("#89dceb"), // Sky - FK indicator
+
+		// Additional tree icon colors
+		MaterializedViewIcon: lipgloss.Color("#89dceb"), // Sky - cached view
+		ProcedureIcon:        lipgloss.Color("#cba6f7"), // Mauve - procedure
+		TriggerFunctionIcon:  lipgloss.Color("#f9e2af"), // Yellow - trigger func
+		SequenceIcon:         lipgloss.Color("#94e2d5"), // Teal - sequential
+		IndexIcon:            lipgloss.Color("#fab387"), // Peach - performance
+		TriggerIcon:          lipgloss.Color("#f38ba8"), // Red - event trigger
+		ExtensionIcon:        lipgloss.Color("#a6e3a1"), // Green - extension
+		TypeIcon:             lipgloss.Color("#74c7ec"), // Sapphire - type
 	}
 }
 

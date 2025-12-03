@@ -56,5 +56,15 @@ func DefaultTheme() Theme {
 		Metadata:         lipgloss.Color("240"), // Gray
 		PrimaryKey:       lipgloss.Color("220"), // Yellow
 		ForeignKey:       lipgloss.Color("75"),  // Blue
+
+		// Additional tree icon colors
+		MaterializedViewIcon: lipgloss.Color("117"), // Light blue - cached view
+		ProcedureIcon:        lipgloss.Color("141"), // Purple - procedure
+		TriggerFunctionIcon:  lipgloss.Color("220"), // Yellow - trigger func
+		SequenceIcon:         lipgloss.Color("80"),  // Teal - sequential
+		IndexIcon:            lipgloss.Color("208"), // Orange - performance
+		TriggerIcon:          lipgloss.Color("196"), // Red - event trigger
+		ExtensionIcon:        lipgloss.Color("42"),  // Green - extension
+		TypeIcon:             lipgloss.Color("111"), // Cyan - type
 	}
 }

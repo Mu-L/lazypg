@@ -55,6 +55,16 @@ type Theme struct {
 	Metadata         lipgloss.Color // Metadata text (row counts, types)
 	PrimaryKey       lipgloss.Color // Primary key indicator
 	ForeignKey       lipgloss.Color // Foreign key indicator
+
+	// Additional tree icon colors
+	MaterializedViewIcon lipgloss.Color
+	ProcedureIcon        lipgloss.Color
+	TriggerFunctionIcon  lipgloss.Color
+	SequenceIcon         lipgloss.Color
+	IndexIcon            lipgloss.Color
+	TriggerIcon          lipgloss.Color
+	ExtensionIcon        lipgloss.Color
+	TypeIcon             lipgloss.Color
 }
 
 // GetTheme returns a theme by name
