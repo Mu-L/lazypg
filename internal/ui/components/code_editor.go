@@ -579,6 +579,11 @@ func (ce *CodeEditor) handleEditKeys(msg tea.KeyMsg) (*CodeEditor, tea.Cmd) {
 		ce.deleteCharAfter()
 	case "enter":
 		ce.insertNewline()
+	case "tab":
+		// Insert 4 spaces for tab
+		for i := 0; i < 4; i++ {
+			ce.insertChar(' ')
+		}
 
 	// Save
 	case "ctrl+s":

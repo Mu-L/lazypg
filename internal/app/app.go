@@ -799,8 +799,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
-		// Handle code editor input if visible
+		// Handle code editor input if visible (only in read-only mode)
+		// In edit mode, code editor captures all keys except global shortcuts
 		if a.showCodeEditor && a.codeEditor != nil {
+			// Allow Tab to close code editor and switch focus (in read-only mode)
+			if a.codeEditor.ReadOnly && msg.String() == "tab" {
+				a.showCodeEditor = false
+				a.codeEditor = nil
+				a.state.FocusedPanel = models.LeftPanel
+				a.updatePanelStyles()
+				return a, nil
+			}
 			_, cmd := a.codeEditor.Update(msg)
 			return a, cmd
 		}
