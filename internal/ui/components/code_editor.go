@@ -392,9 +392,47 @@ func (ce *CodeEditor) View() string {
 	return borderStyle.Width(contentWidth).Render(content)
 }
 
+// getObjectIcon returns the icon and color for the object type
+func (ce *CodeEditor) getObjectIcon() (string, lipgloss.Color) {
+	switch ce.ObjectType {
+	case "function":
+		return "ƒ", ce.Theme.FunctionIcon
+	case "procedure":
+		return "⚙", ce.Theme.ProcedureIcon
+	case "trigger_function":
+		return "⚡", ce.Theme.TriggerFunctionIcon
+	case "view":
+		return "◎", ce.Theme.ViewIcon
+	case "materialized_view":
+		return "◉", ce.Theme.MaterializedViewIcon
+	case "sequence":
+		return "#", ce.Theme.SequenceIcon
+	case "index":
+		return "⊕", ce.Theme.IndexIcon
+	case "trigger":
+		return "↯", ce.Theme.TriggerIcon
+	case "extension":
+		return "◈", ce.Theme.ExtensionIcon
+	case "type", "composite_type":
+		return "◫", ce.Theme.TypeIcon
+	case "enum_type":
+		return "◧", ce.Theme.TypeIcon
+	case "domain_type":
+		return "◨", ce.Theme.TypeIcon
+	case "range_type":
+		return "◩", ce.Theme.TypeIcon
+	default:
+		return "□", ce.Theme.Foreground
+	}
+}
+
 // renderTitleBar renders the title bar with mode indicator
 func (ce *CodeEditor) renderTitleBar(width int) string {
-	// Title on left
+	// Get icon for object type
+	icon, iconColor := ce.getObjectIcon()
+	iconStyled := lipgloss.NewStyle().Foreground(iconColor).Render(icon)
+
+	// Title on left (with icon)
 	title := ce.Title
 	if title == "" {
 		title = "Code Editor"
@@ -411,14 +449,15 @@ func (ce *CodeEditor) renderTitleBar(width int) string {
 	}
 
 	modeWidth := runewidth.StringWidth("[Modified *]") // Use max width for consistent layout
-	titleMaxWidth := width - modeWidth - 2             // 2 for spacing
+	iconWidth := runewidth.StringWidth(icon) + 1       // +1 for space after icon
+	titleMaxWidth := width - modeWidth - iconWidth - 2 // 2 for spacing
 
 	if runewidth.StringWidth(title) > titleMaxWidth {
 		title = runewidth.Truncate(title, titleMaxWidth-3, "...")
 	}
 
-	titleRendered := ce.cachedStyles.title.Render(title)
-	titleWidth := runewidth.StringWidth(title)
+	titleRendered := iconStyled + " " + ce.cachedStyles.title.Render(title)
+	titleWidth := iconWidth + runewidth.StringWidth(title)
 
 	// Calculate padding between title and mode
 	padding := width - titleWidth - runewidth.StringWidth(modeIndicator)
