@@ -63,3 +63,30 @@ func ParseSearchQuery(query string) SearchQuery {
 	q.Pattern = query
 	return q
 }
+
+// FuzzyMatch performs fuzzy subsequence matching
+// Returns whether the pattern matches and the positions of matched characters
+// Matching is case-insensitive
+func FuzzyMatch(pattern, target string) (bool, []int) {
+	if pattern == "" {
+		return true, []int{}
+	}
+
+	patternLower := strings.ToLower(pattern)
+	targetLower := strings.ToLower(target)
+
+	positions := make([]int, 0, len(pattern))
+	patternIdx := 0
+
+	for i := 0; i < len(targetLower) && patternIdx < len(patternLower); i++ {
+		if targetLower[i] == patternLower[patternIdx] {
+			positions = append(positions, i)
+			patternIdx++
+		}
+	}
+
+	if patternIdx == len(patternLower) {
+		return true, positions
+	}
+	return false, nil
+}

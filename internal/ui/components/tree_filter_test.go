@@ -79,3 +79,53 @@ func TestParseSearchQuery_TypeOnlyNoPattern(t *testing.T) {
 		t.Errorf("expected TypeFilter 'table', got '%s'", q.TypeFilter)
 	}
 }
+
+func TestFuzzyMatch_ExactPrefix(t *testing.T) {
+	match, positions := FuzzyMatch("plan", "plan_check_run")
+
+	if !match {
+		t.Error("expected match")
+	}
+	if len(positions) != 4 || positions[0] != 0 || positions[1] != 1 || positions[2] != 2 || positions[3] != 3 {
+		t.Errorf("expected positions [0,1,2,3], got %v", positions)
+	}
+}
+
+func TestFuzzyMatch_Subsequence(t *testing.T) {
+	match, positions := FuzzyMatch("pcr", "plan_check_run")
+
+	if !match {
+		t.Error("expected match")
+	}
+	// p=0, c=5, r=11
+	if len(positions) != 3 {
+		t.Errorf("expected 3 positions, got %d", len(positions))
+	}
+}
+
+func TestFuzzyMatch_NoMatch(t *testing.T) {
+	match, _ := FuzzyMatch("xyz", "plan_check_run")
+
+	if match {
+		t.Error("expected no match")
+	}
+}
+
+func TestFuzzyMatch_CaseInsensitive(t *testing.T) {
+	match, _ := FuzzyMatch("PLAN", "plan_check_run")
+
+	if !match {
+		t.Error("expected case-insensitive match")
+	}
+}
+
+func TestFuzzyMatch_EmptyPattern(t *testing.T) {
+	match, positions := FuzzyMatch("", "anything")
+
+	if !match {
+		t.Error("empty pattern should match everything")
+	}
+	if len(positions) != 0 {
+		t.Error("empty pattern should have no positions")
+	}
+}
