@@ -3,6 +3,8 @@ package components
 
 import (
 	"strings"
+
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 // SearchQuery represents a parsed search query
@@ -89,4 +91,36 @@ func FuzzyMatch(pattern, target string) (bool, []int) {
 		return true, positions
 	}
 	return false, nil
+}
+
+// nodeTypeMapping maps type filter strings to TreeNodeTypes
+var nodeTypeMapping = map[string][]models.TreeNodeType{
+	"table":     {models.TreeNodeTypeTable},
+	"view":      {models.TreeNodeTypeView, models.TreeNodeTypeMaterializedView},
+	"function":  {models.TreeNodeTypeFunction, models.TreeNodeTypeTriggerFunction},
+	"schema":    {models.TreeNodeTypeSchema},
+	"sequence":  {models.TreeNodeTypeSequence},
+	"extension": {models.TreeNodeTypeExtension},
+	"column":    {models.TreeNodeTypeColumn},
+	"index":     {models.TreeNodeTypeIndex},
+}
+
+// NodeMatchesType checks if a node matches the given type filter
+// Empty filter matches all nodes
+func NodeMatchesType(node *models.TreeNode, typeFilter string) bool {
+	if typeFilter == "" {
+		return true
+	}
+
+	nodeTypes, ok := nodeTypeMapping[typeFilter]
+	if !ok {
+		return false
+	}
+
+	for _, nt := range nodeTypes {
+		if node.Type == nt {
+			return true
+		}
+	}
+	return false
 }

@@ -3,6 +3,8 @@ package components
 
 import (
 	"testing"
+
+	"github.com/rebelice/lazypg/internal/models"
 )
 
 func TestParseSearchQuery_Simple(t *testing.T) {
@@ -127,5 +129,40 @@ func TestFuzzyMatch_EmptyPattern(t *testing.T) {
 	}
 	if len(positions) != 0 {
 		t.Error("empty pattern should have no positions")
+	}
+}
+
+func TestNodeMatchesType_Table(t *testing.T) {
+	node := &models.TreeNode{Type: models.TreeNodeTypeTable}
+
+	if !NodeMatchesType(node, "table") {
+		t.Error("table node should match 'table' type filter")
+	}
+	if NodeMatchesType(node, "view") {
+		t.Error("table node should not match 'view' type filter")
+	}
+}
+
+func TestNodeMatchesType_EmptyFilter(t *testing.T) {
+	node := &models.TreeNode{Type: models.TreeNodeTypeTable}
+
+	if !NodeMatchesType(node, "") {
+		t.Error("empty filter should match any node")
+	}
+}
+
+func TestNodeMatchesType_Function(t *testing.T) {
+	node := &models.TreeNode{Type: models.TreeNodeTypeFunction}
+
+	if !NodeMatchesType(node, "function") {
+		t.Error("function node should match 'function' type filter")
+	}
+}
+
+func TestNodeMatchesType_Schema(t *testing.T) {
+	node := &models.TreeNode{Type: models.TreeNodeTypeSchema}
+
+	if !NodeMatchesType(node, "schema") {
+		t.Error("schema node should match 'schema' type filter")
 	}
 }
