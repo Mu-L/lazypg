@@ -27,6 +27,7 @@ type TableView struct {
 	Height       int
 	Style        lipgloss.Style
 	Theme        theme.Theme // Color theme
+	Focused      bool        // Whether this component has focus
 
 	// Virtual scrolling state
 	TopRow       int
@@ -87,6 +88,8 @@ type tableViewStyles struct {
 	lineNumSelected  lipgloss.Style
 	lineNumRelative  lipgloss.Style
 	status           lipgloss.Style
+	containerNormal  lipgloss.Style // Container border style when not focused
+	containerFocused lipgloss.Style // Container border style when focused
 }
 
 // MatchPos represents a search match position
@@ -154,6 +157,12 @@ func (tv *TableView) initStyles() {
 		status: lipgloss.NewStyle().
 			Foreground(tv.Theme.Metadata).
 			Italic(true),
+		containerNormal: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(tv.Theme.Border),
+		containerFocused: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(tv.Theme.BorderFocused),
 	}
 }
 
@@ -286,15 +295,15 @@ func (tv *TableView) calculateColumnWidths() {
 	}
 }
 
-// calculateVisibleCols calculates how many columns fit in the current width
-func (tv *TableView) calculateVisibleCols() {
+// calculateVisibleCols calculates how many columns fit in the given width
+func (tv *TableView) calculateVisibleCols(width int) {
 	if len(tv.ColumnWidths) == 0 {
 		tv.VisibleCols = 0
 		return
 	}
 
 	// Reserve space for edge indicators (2 chars each side) and line numbers
-	availableWidth := tv.Width - 4 - tv.getLineNumberWidth()
+	availableWidth := width - 4 - tv.getLineNumberWidth()
 
 	// Count columns that fit starting from LeftColOffset
 	totalWidth := 0
@@ -321,12 +330,23 @@ func (tv *TableView) calculateVisibleCols() {
 
 // View renders the table
 func (tv *TableView) View() string {
+	// Select container style based on focus
+	containerStyle := tv.cachedStyles.containerNormal
+	if tv.Focused {
+		containerStyle = tv.cachedStyles.containerFocused
+	}
+
+	// Calculate content dimensions (inside border)
+	// tv.Width/tv.Height are the total available space including border
+	contentWidth := tv.Width - containerStyle.GetHorizontalFrameSize()
+	contentHeight := tv.Height - containerStyle.GetVerticalFrameSize()
+
 	if len(tv.Columns) == 0 {
-		return tv.Style.Render("No data")
+		return containerStyle.Width(contentWidth).Height(contentHeight).Render("No data")
 	}
 
 	// Calculate visible columns for horizontal scrolling
-	tv.calculateVisibleCols()
+	tv.calculateVisibleCols(contentWidth)
 
 	var b strings.Builder
 
@@ -366,9 +386,9 @@ func (tv *TableView) View() string {
 	b.WriteString("\n")
 
 	// Calculate how many rows we can show
-	// Height is already the content area height
+	// contentHeight is the content area height (inside border)
 	// Subtract 3 for header + separator + status line
-	tv.VisibleRows = tv.Height - 3
+	tv.VisibleRows = contentHeight - 3
 	if tv.VisibleRows < 1 {
 		tv.VisibleRows = 1
 	}
@@ -403,7 +423,9 @@ func (tv *TableView) View() string {
 	b.WriteString("\n")
 	b.WriteString(tv.renderStatus())
 
-	return tv.Style.Width(tv.Width).Height(tv.Height).Render(b.String())
+	// Render content and wrap in container with border
+	// Note: containerStyle.Width() sets the content width, border renders outside
+	return containerStyle.Width(contentWidth).Height(contentHeight).Render(b.String())
 }
 
 func (tv *TableView) renderHeader() string {
