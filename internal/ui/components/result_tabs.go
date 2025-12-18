@@ -29,6 +29,15 @@ var (
 	insertRe       = regexp.MustCompile(`(?i)\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
 )
 
+// TabType represents the type of content in a tab
+type TabType int
+
+const (
+	TabTypeQueryResult TabType = iota // SQL query result
+	TabTypeTableData                  // Table/View data from tree selection
+	TabTypeCodeEditor                 // Function, Sequence, etc. (code/DDL display)
+)
+
 // ResultTab represents a single query result tab
 type ResultTab struct {
 	ID          int
@@ -39,6 +48,14 @@ type ResultTab struct {
 	TableView   *TableView
 	IsPending   bool // true if query is still executing
 	IsCancelled bool // true if query was cancelled
+
+	// Tab type and additional content
+	Type       TabType
+	CodeEditor *CodeEditor    // For code/DDL display tabs
+	Structure  *StructureView // For table data tabs
+
+	// Identifier for deduplication (e.g., "schema.table" or "schema.function")
+	ObjectID string
 }
 
 // ResultTabs manages multiple query result tabs
@@ -156,6 +173,7 @@ func (rt *ResultTabs) AddResult(sql string, result models.QueryResult) {
 		Result:    result,
 		CreatedAt: time.Now(),
 		TableView: tableView,
+		Type:      TabTypeQueryResult,
 	}
 	rt.nextID++
 
@@ -169,6 +187,107 @@ func (rt *ResultTabs) AddResult(sql string, result models.QueryResult) {
 
 	// Set new tab as active (index 0 = leftmost)
 	rt.activeIdx = 0
+}
+
+// AddTableData adds a table/view data tab (from tree selection)
+// If a tab for the same objectID exists, it becomes active instead of creating a new tab
+func (rt *ResultTabs) AddTableData(objectID, title string, structure *StructureView) {
+	// Check if tab for this object already exists
+	for i, tab := range rt.tabs {
+		if tab.ObjectID == objectID && tab.Type == TabTypeTableData {
+			// Tab exists, just activate it
+			rt.activeIdx = i
+			return
+		}
+	}
+
+	tab := &ResultTab{
+		ID:        rt.nextID,
+		Title:     title,
+		CreatedAt: time.Now(),
+		Type:      TabTypeTableData,
+		Structure: structure,
+		ObjectID:  objectID,
+	}
+	rt.nextID++
+
+	// Insert new tab at the beginning (leftmost position)
+	rt.tabs = append([]*ResultTab{tab}, rt.tabs...)
+
+	// Remove oldest (rightmost) if exceeding max
+	if len(rt.tabs) > MaxResultTabs {
+		rt.tabs = rt.tabs[:MaxResultTabs]
+	}
+
+	// Set new tab as active (index 0 = leftmost)
+	rt.activeIdx = 0
+}
+
+// AddCodeEditor adds a code/DDL display tab (for functions, sequences, etc.)
+// If a tab for the same objectID exists, it becomes active instead of creating a new tab
+func (rt *ResultTabs) AddCodeEditor(objectID, title string, codeEditor *CodeEditor) {
+	// Check if tab for this object already exists
+	for i, tab := range rt.tabs {
+		if tab.ObjectID == objectID && tab.Type == TabTypeCodeEditor {
+			// Tab exists, just activate it
+			rt.activeIdx = i
+			return
+		}
+	}
+
+	tab := &ResultTab{
+		ID:         rt.nextID,
+		Title:      title,
+		CreatedAt:  time.Now(),
+		Type:       TabTypeCodeEditor,
+		CodeEditor: codeEditor,
+		ObjectID:   objectID,
+	}
+	rt.nextID++
+
+	// Insert new tab at the beginning (leftmost position)
+	rt.tabs = append([]*ResultTab{tab}, rt.tabs...)
+
+	// Remove oldest (rightmost) if exceeding max
+	if len(rt.tabs) > MaxResultTabs {
+		rt.tabs = rt.tabs[:MaxResultTabs]
+	}
+
+	// Set new tab as active (index 0 = leftmost)
+	rt.activeIdx = 0
+}
+
+// CloseActiveTab closes the currently active tab
+func (rt *ResultTabs) CloseActiveTab() {
+	if len(rt.tabs) == 0 {
+		return
+	}
+
+	// Remove the active tab
+	rt.tabs = append(rt.tabs[:rt.activeIdx], rt.tabs[rt.activeIdx+1:]...)
+
+	// Adjust active index
+	if rt.activeIdx >= len(rt.tabs) && len(rt.tabs) > 0 {
+		rt.activeIdx = len(rt.tabs) - 1
+	}
+}
+
+// GetActiveStructureView returns the StructureView of the active tab (if it's a table data tab)
+func (rt *ResultTabs) GetActiveStructureView() *StructureView {
+	tab := rt.GetActiveTab()
+	if tab == nil || tab.Type != TabTypeTableData {
+		return nil
+	}
+	return tab.Structure
+}
+
+// GetActiveCodeEditor returns the CodeEditor of the active tab (if it's a code editor tab)
+func (rt *ResultTabs) GetActiveCodeEditor() *CodeEditor {
+	tab := rt.GetActiveTab()
+	if tab == nil || tab.Type != TabTypeCodeEditor {
+		return nil
+	}
+	return tab.CodeEditor
 }
 
 // generateTitle generates a smart title for the tab
@@ -256,6 +375,10 @@ func (rt *ResultTabs) GetActiveTableView() *TableView {
 	if tab == nil {
 		return nil
 	}
+	// For TableData tabs, get table view from structure view
+	if tab.Type == TabTypeTableData && tab.Structure != nil {
+		return tab.Structure.GetActiveTableView()
+	}
 	return tab.TableView
 }
 
@@ -287,6 +410,11 @@ func (rt *ResultTabs) TabCount() int {
 	return len(rt.tabs)
 }
 
+// GetAllTabs returns all tabs for iteration
+func (rt *ResultTabs) GetAllTabs() []*ResultTab {
+	return rt.tabs
+}
+
 // HasTabs returns whether there are any tabs
 func (rt *ResultTabs) HasTabs() bool {
 	return len(rt.tabs) > 0
@@ -309,14 +437,26 @@ func (rt *ResultTabs) RenderTabBar(width int) string {
 	var tabViews []string
 
 	for i, tab := range rt.tabs {
-		// Format: [index] title (rows)
-		rowCount := len(tab.Result.Rows)
-		rowStr := fmt.Sprintf("%d rows", rowCount)
-		if rowCount == 1 {
-			rowStr = "1 row"
+		// Generate label based on tab type
+		var label string
+		switch tab.Type {
+		case TabTypeQueryResult:
+			// Format: [index] title (rows)
+			rowCount := len(tab.Result.Rows)
+			rowStr := fmt.Sprintf("%d rows", rowCount)
+			if rowCount == 1 {
+				rowStr = "1 row"
+			}
+			label = fmt.Sprintf("[%d] %s (%s)", i+1, tab.Title, rowStr)
+		case TabTypeTableData:
+			// Format: [index] ▦ title
+			label = fmt.Sprintf("[%d] ▦ %s", i+1, tab.Title)
+		case TabTypeCodeEditor:
+			// Format: [index] ƒ title
+			label = fmt.Sprintf("[%d] ƒ %s", i+1, tab.Title)
+		default:
+			label = fmt.Sprintf("[%d] %s", i+1, tab.Title)
 		}
-
-		label := fmt.Sprintf("[%d] %s (%s)", i+1, tab.Title, rowStr)
 
 		// Truncate if too long
 		maxLabelLen := width / MaxResultTabs
@@ -324,8 +464,10 @@ func (rt *ResultTabs) RenderTabBar(width int) string {
 			maxLabelLen = 15
 		}
 		if len(label) > maxLabelLen {
-			// Try without row count
-			label = fmt.Sprintf("[%d] %s", i+1, tab.Title)
+			// Try without row count for query results
+			if tab.Type == TabTypeQueryResult {
+				label = fmt.Sprintf("[%d] %s", i+1, tab.Title)
+			}
 			if len(label) > maxLabelLen {
 				label = label[:maxLabelLen-3] + "..."
 			}

@@ -210,9 +210,21 @@ type QueryResultMsg struct {
 type ObjectDetailsLoadedMsg struct {
 	ObjectType string // "function", "sequence", "extension", "type", "index", "trigger"
 	ObjectName string // "schema.name" for save operations
+	ObjectID   string // Unique ID for tab deduplication (e.g., "schema.function_name")
 	Title      string
 	Content    string // Formatted content to display
 	Err        error
+}
+
+// TabTableDataLoadedMsg is sent when table data for a tab is loaded
+type TabTableDataLoadedMsg struct {
+	ObjectID  string   // schema.table identifier
+	Schema    string
+	Table     string
+	Columns   []string
+	Rows      [][]string
+	TotalRows int
+	Err       error
 }
 
 // New creates a new App instance with config
@@ -912,6 +924,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
+		case "1", "2", "3", "4":
+			// Switch structure view sub-tabs when active tab is TableData
+			if !a.isSQLEditorFocused() {
+				activeTab := a.resultTabs.GetActiveTab()
+				if activeTab != nil && activeTab.Type == components.TabTypeTableData && activeTab.Structure != nil {
+					tabIndex := int(msg.String()[0] - '1') // Convert "1"-"4" to 0-3
+					activeTab.Structure.SwitchTab(tabIndex)
+					return a, nil
+				}
+				// Legacy: also handle global structure view
+				if a.currentTable != "" {
+					tabIndex := int(msg.String()[0] - '1')
+					a.currentTab = tabIndex
+					a.structureView.SwitchTab(tabIndex)
+					return a, nil
+				}
+			}
+
 		case "ctrl+p":
 			// Open SQL editor (expand if collapsed)
 			if !a.sqlEditor.IsExpanded() {
@@ -1388,24 +1418,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Clear any active filter when switching tables
-			a.activeFilter = nil
-
-			// Store selected node and current table
+			// Store selected node
 			a.state.TreeSelected = msg.Node
-			a.currentTable = schemaName + "." + msg.Node.Label
 
-			// Close code editor (we're now showing table data)
-			a.showCodeEditor = false
-			a.codeEditor = nil
+			// Create object ID for tab deduplication
+			objectID := schemaName + "." + msg.Node.Label
 
-			// Load table/view data
-			return a, a.loadTableData(LoadTableDataMsg{
-				Schema: schemaName,
-				Table:  msg.Node.Label,
-				Offset: 0,
-				Limit:  100,
-			})
+			// Check if tab for this table already exists
+			existingFound := false
+			for i, tab := range a.resultTabs.GetAllTabs() {
+				if tab.ObjectID == objectID && tab.Type == components.TabTypeTableData {
+					a.resultTabs.SetActiveTab(i)
+					existingFound = true
+					a.state.FocusArea = models.FocusDataPanel
+					a.updatePanelStyles()
+					break
+				}
+			}
+
+			if !existingFound {
+				// Create new StructureView for this table
+				tableView := components.NewTableView(a.theme)
+				structureView := components.NewStructureView(a.theme, tableView)
+
+				// Add as a new tab
+				a.resultTabs.AddTableData(objectID, msg.Node.Label, structureView)
+
+				// Load table data asynchronously
+				return a, a.loadTableDataForTab(schemaName, msg.Node.Label, objectID)
+			}
+			return a, nil
 
 		case models.TreeNodeTypeFunction, models.TreeNodeTypeProcedure:
 			// Display function/procedure source code
@@ -1479,20 +1521,41 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.ShowError("Error", fmt.Sprintf("Failed to load %s details:\n\n%v", msg.ObjectType, msg.Err))
 			return a, nil
 		}
+
+		// Check if tab for this object already exists
+		for i, tab := range a.resultTabs.GetAllTabs() {
+			if tab.ObjectID == msg.ObjectID && tab.Type == components.TabTypeCodeEditor {
+				a.resultTabs.SetActiveTab(i)
+				a.state.FocusArea = models.FocusDataPanel
+				a.updatePanelStyles()
+				return a, nil
+			}
+		}
+
 		// Create code editor to display the object details
-		a.codeEditor = components.NewCodeEditor(a.theme)
-		a.codeEditor.SetContent(msg.Content, msg.ObjectType, msg.Title)
-		a.codeEditor.ObjectName = msg.ObjectName
-		a.showCodeEditor = true
+		codeEditor := components.NewCodeEditor(a.theme)
+		codeEditor.SetContent(msg.Content, msg.ObjectType, msg.Title)
+		codeEditor.ObjectName = msg.ObjectName
+
+		// Add as a new tab
+		a.resultTabs.AddCodeEditor(msg.ObjectID, msg.Title, codeEditor)
 		a.state.FocusArea = models.FocusDataPanel
 		a.updatePanelStyles()
 		return a, nil
 
 	case components.CodeEditorCloseMsg:
-		// Close the code editor and return to tree navigation
+		// Close the active tab if it's a code editor tab
+		activeTab := a.resultTabs.GetActiveTab()
+		if activeTab != nil && activeTab.Type == components.TabTypeCodeEditor {
+			a.resultTabs.CloseActiveTab()
+		}
+		// Legacy: also clear the global code editor state
 		a.showCodeEditor = false
 		a.codeEditor = nil
-		a.state.FocusArea = models.FocusTreeView
+		// If no more tabs, return to tree
+		if !a.resultTabs.HasTabs() {
+			a.state.FocusArea = models.FocusTreeView
+		}
 		a.updatePanelStyles()
 		return a, nil
 
@@ -1506,6 +1569,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		// Success - update the code editor's original content and exit edit mode
+		activeTab := a.resultTabs.GetActiveTab()
+		if activeTab != nil && activeTab.Type == components.TabTypeCodeEditor && activeTab.CodeEditor != nil {
+			activeTab.CodeEditor.Original = activeTab.CodeEditor.GetContent()
+			activeTab.CodeEditor.Modified = false
+			activeTab.CodeEditor.ExitEditMode(false) // Keep changes
+		}
+		// Legacy: also update global code editor
 		if a.codeEditor != nil {
 			a.codeEditor.Original = a.codeEditor.GetContent()
 			a.codeEditor.Modified = false
@@ -1540,6 +1610,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tableView.Rows = append(a.tableView.Rows, msg.Rows...)
 			a.tableView.TotalRows = msg.TotalRows
 		}
+		return a, nil
+
+	case TabTableDataLoadedMsg:
+		if msg.Err != nil {
+			a.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
+			return a, nil
+		}
+
+		// Find the tab with this objectID and update its data
+		for _, tab := range a.resultTabs.GetAllTabs() {
+			if tab.ObjectID == msg.ObjectID && tab.Type == components.TabTypeTableData {
+				if tab.Structure != nil {
+					// Set table data in the structure view
+					tab.Structure.GetTableView().SetData(msg.Columns, msg.Rows, msg.TotalRows)
+					// Also load structure metadata (columns, constraints, indexes)
+					conn, err := a.connectionManager.GetActive()
+					if err == nil && conn != nil && conn.Pool != nil {
+						ctx := context.Background()
+						_ = tab.Structure.SetTable(ctx, conn.Pool, msg.Schema, msg.Table)
+					}
+				}
+				break
+			}
+		}
+		a.state.FocusArea = models.FocusDataPanel
+		a.updatePanelStyles()
 		return a, nil
 
 	case tea.WindowSizeMsg:
@@ -1728,8 +1824,16 @@ func (a *App) renderNormalView() string {
 	// Common keys on the right with icons
 	bottomBarRight := styles.keyStyle.Render("Tab") + styles.dimStyle.Render(" switch") +
 		styles.separatorStyle.Render(" │ ") +
-		styles.keyStyle.Render("[]") + styles.dimStyle.Render(" tabs") +
-		styles.separatorStyle.Render(" │ ") +
+		styles.keyStyle.Render("[]") + styles.dimStyle.Render(" tabs")
+
+	// Show 1-4 hint when active tab is TableData
+	activeTab := a.resultTabs.GetActiveTab()
+	if activeTab != nil && activeTab.Type == components.TabTypeTableData {
+		bottomBarRight += styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("1-4") + styles.dimStyle.Render(" structure")
+	}
+
+	bottomBarRight += styles.separatorStyle.Render(" │ ") +
 		styles.keyStyle.Render("c") + styles.dimStyle.Render(" connect") +
 		styles.separatorStyle.Render(" │ ") +
 		styles.keyStyle.Render("q") + styles.dimStyle.Render(" quit")
@@ -1971,17 +2075,69 @@ func (a *App) renderDataPanel(width, height int) string {
 				return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 			}
 
-			// Show active tab's table view
-			activeTable := a.resultTabs.GetActiveTableView()
-			if activeTable != nil {
-				activeTable.Width = width
-				activeTable.Height = height
-				return activeTable.View()
+			// Render based on tab type
+			switch activeTab.Type {
+			case components.TabTypeQueryResult:
+				// Show query result table view
+				activeTable := a.resultTabs.GetActiveTableView()
+				if activeTable != nil {
+					activeTable.Width = width
+					activeTable.Height = height - 1
+					// Add empty line placeholder to align with TableData mode
+					return "\n" + activeTable.View()
+				}
+
+			case components.TabTypeTableData:
+				// Show table data with structure view
+				if activeTab.Structure != nil {
+					// Calculate preview pane height (only if visible)
+					structureView := activeTab.Structure
+					activeTable := structureView.GetActiveTableView()
+					previewHeight := 0
+					if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
+						maxPreviewHeight := height / 3
+						if maxPreviewHeight < 5 {
+							maxPreviewHeight = 5
+						}
+						activeTable.SetPreviewPaneDimensions(width, maxPreviewHeight)
+						previewHeight = activeTable.GetPreviewPaneHeight()
+					}
+
+					// Calculate main content height
+					mainHeight := height - previewHeight
+					if mainHeight < 5 {
+						mainHeight = 5
+					}
+
+					// Update structure view dimensions
+					structureView.Width = width
+					structureView.Height = mainHeight
+
+					// Render main content
+					mainContent := structureView.View()
+
+					// If preview pane is visible, append it
+					if activeTable != nil && previewHeight > 0 {
+						previewContent := activeTable.PreviewPane.View()
+						return lipgloss.JoinVertical(lipgloss.Left, mainContent, previewContent)
+					}
+
+					return mainContent
+				}
+
+			case components.TabTypeCodeEditor:
+				// Show code editor
+				if activeTab.CodeEditor != nil {
+					activeTab.CodeEditor.Width = width
+					activeTab.CodeEditor.Height = height - 1
+					// Add empty line placeholder to align with TableData mode
+					return "\n" + activeTab.CodeEditor.View()
+				}
 			}
 		}
 	}
 
-	// If table is selected in tree, show structure view
+	// Legacy: If table is selected in tree (without tabs), show structure view
 	if a.currentTable != "" {
 		// Calculate preview pane height (only if visible)
 		// Get active table view for preview pane handling
@@ -2035,7 +2191,7 @@ func (a *App) renderDataPanel(width, height int) string {
 		return mainContent
 	}
 
-	// If we have code editor to display (function source, sequence info, etc.)
+	// Legacy: If we have code editor to display (function source, sequence info, etc.)
 	if a.showCodeEditor && a.codeEditor != nil {
 		a.codeEditor.Width = width
 		a.codeEditor.Height = height
@@ -3586,6 +3742,32 @@ func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
 	}
 }
 
+// loadTableDataForTab loads table data for a specific tab
+func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return TabTableDataLoadedMsg{ObjectID: objectID, Err: fmt.Errorf("no active connection: %w", err)}
+		}
+
+		data, err := metadata.QueryTableData(ctx, conn.Pool, schema, table, 0, 100, nil)
+		if err != nil {
+			return TabTableDataLoadedMsg{ObjectID: objectID, Err: err}
+		}
+
+		return TabTableDataLoadedMsg{
+			ObjectID:  objectID,
+			Schema:    schema,
+			Table:     table,
+			Columns:   data.Columns,
+			Rows:      data.Rows,
+			TotalRows: int(data.TotalRows),
+		}
+	}
+}
+
 // loadTableDataWithFilter loads table data with an applied filter
 func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
 	return func() tea.Msg {
@@ -3904,10 +4086,12 @@ func (a *App) loadFunctionSource(node *models.TreeNode) tea.Cmd {
 
 		title := fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments)
 		content := source.Definition
+		objectID := fmt.Sprintf("func:%s.%s(%s)", schema, source.Name, source.Arguments)
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "function",
 			ObjectName: fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments),
+			ObjectID:   objectID,
 			Title:      title,
 			Content:    content,
 		}
@@ -3935,10 +4119,12 @@ func (a *App) loadTriggerFunctionSource(node *models.TreeNode) tea.Cmd {
 
 		title := fmt.Sprintf("%s.%s() → trigger", schema, source.Name)
 		content := source.Definition
+		objectID := fmt.Sprintf("trigfunc:%s.%s", schema, source.Name)
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "trigger_function",
 			ObjectName: fmt.Sprintf("%s.%s", schema, source.Name),
+			ObjectID:   objectID,
 			Title:      title,
 			Content:    content,
 		}
@@ -3983,8 +4169,10 @@ func (a *App) loadSequenceDetails(node *models.TreeNode) tea.Cmd {
 		}
 		b.WriteString(";")
 
+		objectID := fmt.Sprintf("seq:%s.%s", schema, details.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "sequence",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s", schema, details.Name),
 			Content:    b.String(),
 		}
@@ -4024,8 +4212,10 @@ func (a *App) loadIndexDetails(node *models.TreeNode) tea.Cmd {
 			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("index %s not found", node.Label)}
 		}
 
+		objectID := fmt.Sprintf("idx:%s.%s.%s", schema, table, node.Label)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "index",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
 			Content:    content,
 		}
@@ -4065,8 +4255,10 @@ func (a *App) loadTriggerDetails(node *models.TreeNode) tea.Cmd {
 			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("trigger %s not found", node.Label)}
 		}
 
+		objectID := fmt.Sprintf("trig:%s.%s.%s", schema, table, node.Label)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "trigger",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
 			Content:    content,
 		}
@@ -4105,8 +4297,10 @@ func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(fmt.Sprintf("    SCHEMA %s\n", details.Schema))
 		b.WriteString(fmt.Sprintf("    VERSION '%s';", details.Version))
 
+		objectID := fmt.Sprintf("ext:%s", details.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "extension",
+			ObjectID:   objectID,
 			Title:      details.Name,
 			Content:    b.String(),
 		}
@@ -4144,8 +4338,10 @@ func (a *App) loadCompositeTypeDetails(node *models.TreeNode) tea.Cmd {
 		}
 		b.WriteString(");")
 
+		objectID := fmt.Sprintf("type:composite:%s.%s", schema, details.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "type",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (composite)", schema, details.Name),
 			Content:    b.String(),
 		}
@@ -4196,8 +4392,10 @@ func (a *App) loadEnumTypeDetails(node *models.TreeNode) tea.Cmd {
 		}
 		b.WriteString(");")
 
+		objectID := fmt.Sprintf("type:enum:%s.%s", schema, enumType.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "type",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (enum)", schema, enumType.Name),
 			Content:    b.String(),
 		}
@@ -4237,8 +4435,10 @@ func (a *App) loadDomainTypeDetails(node *models.TreeNode) tea.Cmd {
 		}
 		b.WriteString(";")
 
+		objectID := fmt.Sprintf("type:domain:%s.%s", schema, details.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "type",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (domain)", schema, details.Name),
 			Content:    b.String(),
 		}
@@ -4281,8 +4481,10 @@ func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
 		content := fmt.Sprintf("CREATE TYPE %s.%s AS RANGE (\n    SUBTYPE = %s\n);",
 			schema, rangeType.Name, rangeType.Subtype)
 
+		objectID := fmt.Sprintf("type:range:%s.%s", schema, rangeType.Name)
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "type",
+			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (range)", schema, rangeType.Name),
 			Content:    content,
 		}

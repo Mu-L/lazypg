@@ -333,6 +333,11 @@ func (sv *StructureView) GetActiveTableView() *TableView {
 	}
 }
 
+// GetTableView returns the main data TableView (for tab 0)
+func (sv *StructureView) GetTableView() *TableView {
+	return sv.tableView
+}
+
 // View renders the structure view
 func (sv *StructureView) View() string {
 	if sv.loading {
@@ -353,8 +358,8 @@ func (sv *StructureView) View() string {
 	b.WriteString(sv.renderTabBar())
 	b.WriteString("\n")
 
-	// Calculate content height (subtract tab bar + newline)
-	contentHeight := sv.Height - 2
+	// Calculate content height (subtract tab bar)
+	contentHeight := sv.Height - 1
 
 	// Update view dimensions for all TableViews
 	sv.tableView.Width = sv.Width
