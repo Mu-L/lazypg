@@ -837,29 +837,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// If SQL editor is focused and expanded, route input there
-		if a.isSQLEditorFocused() && a.sqlEditor.IsExpanded() {
+		// If SQL editor is focused, handle input
+		if a.isSQLEditorFocused() {
 			// Handle escape to unfocus
 			if msg.String() == "esc" {
-				a.sqlEditor.Collapse()
+				if a.sqlEditor.IsExpanded() {
+					a.sqlEditor.Collapse()
+				}
 				a.state.FocusArea = models.FocusDataPanel
 				a.updatePanelStyles()
 				return a, nil
 			}
 
-			// Handle ctrl+e to collapse
+			// Handle ctrl+e to toggle expand/collapse
 			if msg.String() == "ctrl+e" {
-				a.sqlEditor.Collapse()
-				a.state.FocusArea = models.FocusDataPanel
-				a.updatePanelStyles()
+				if a.sqlEditor.IsExpanded() {
+					a.sqlEditor.Collapse()
+					a.state.FocusArea = models.FocusDataPanel
+					a.updatePanelStyles()
+				} else {
+					a.sqlEditor.Expand()
+				}
 				return a, nil
 			}
 
-			// Tab is handled in the unified Tab case below when not editing
+			// Tab is handled in the unified Tab case below for focus cycling
 			if msg.String() == "tab" || msg.String() == "shift+tab" || msg.String() == "backtab" {
 				// Let Tab fall through to the switch case for focus cycling
-			} else {
-				// Route other keys to SQL editor
+			} else if a.sqlEditor.IsExpanded() {
+				// Route other keys to SQL editor when expanded
+				_, cmd := a.sqlEditor.Update(msg)
+				return a, cmd
+			} else if isPrintableInput(msg.String()) {
+				// Auto-expand and route printable input when collapsed but focused
+				a.sqlEditor.Expand()
 				_, cmd := a.sqlEditor.Update(msg)
 				return a, cmd
 			}
@@ -2332,6 +2343,42 @@ func (a *App) isEditingText() bool {
 // isSQLEditorFocused returns true if SQL editor has focus (compatibility helper)
 func (a *App) isSQLEditorFocused() bool {
 	return a.state.FocusArea == models.FocusSQLEditor
+}
+
+// isPrintableInput checks if a key message is a printable character input
+// that should trigger auto-expand in SQL editor (not a control/shortcut key)
+func isPrintableInput(key string) bool {
+	// Blacklist: keys that should always be shortcuts, not input
+	blacklist := map[string]bool{
+		"tab": true, "shift+tab": true, "backtab": true,
+		"esc": true, "escape": true,
+		"[": true, "]": true,
+		"up": true, "down": true, "left": true, "right": true,
+		"home": true, "end": true, "pgup": true, "pgdown": true,
+		"f1": true, "f2": true, "f3": true, "f4": true, "f5": true,
+		"f6": true, "f7": true, "f8": true, "f9": true, "f10": true,
+		"f11": true, "f12": true,
+	}
+
+	if blacklist[key] {
+		return false
+	}
+
+	// Any key with Ctrl or Alt modifier is a shortcut
+	if strings.HasPrefix(key, "ctrl+") || strings.HasPrefix(key, "alt+") {
+		return false
+	}
+
+	// Single printable characters, space, enter, backspace are input
+	if len(key) == 1 {
+		return true
+	}
+
+	// Special input keys
+	inputKeys := map[string]bool{
+		"enter": true, "space": true, "backspace": true, "delete": true,
+	}
+	return inputKeys[key]
 }
 
 // handleMouseEvent processes mouse events for scrolling and clicking using bubblezone
