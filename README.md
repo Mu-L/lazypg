@@ -58,7 +58,7 @@ Filter table rows instantly with `/`. Type your search term and watch results up
 
 ### JSONB Viewer
 
-JSONB columns are first-class citizens. View them formatted, navigate as a tree, or get ready-to-use query snippets.
+Native JSONB support with formatted display, tree navigation, and ready-to-use query snippets.
 
 ![JSONB Viewer](assets/jsonb.gif)
 
