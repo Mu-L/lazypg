@@ -1,7 +1,9 @@
 package connection_history
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,9 +14,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ConnectionConfigResult contains the result of getting a connection config with password
+type ConnectionConfigResult struct {
+	Config          models.ConnectionConfig
+	PasswordMissing bool
+	Error           error
+}
+
 // Manager manages connection history
 type Manager struct {
 	path          string
+	configDir     string
 	history       []models.ConnectionHistoryEntry
 	passwordStore *PasswordStore
 }
@@ -24,9 +34,21 @@ func NewManager(configDir string) (*Manager, error) {
 	path := filepath.Join(configDir, "connection_history.yaml")
 
 	m := &Manager{
-		path:          path,
-		history:       []models.ConnectionHistoryEntry{},
-		passwordStore: NewPasswordStore(),
+		path:      path,
+		configDir: configDir,
+		history:   []models.ConnectionHistoryEntry{},
+	}
+
+	// Initialize password store
+	passwordStore, err := NewPasswordStore(configDir)
+	if err != nil {
+		// Log warning but continue without password storage
+		log.Printf("Warning: Failed to initialize password store: %v", err)
+	} else {
+		m.passwordStore = passwordStore
+		if passwordStore.IsUsingFallback() {
+			log.Printf("Info: Using encrypted file for password storage (system keyring unavailable)")
+		}
 	}
 
 	// Load existing history if file exists
@@ -37,6 +59,15 @@ func NewManager(configDir string) (*Manager, error) {
 	}
 
 	return m, nil
+}
+
+// IsUsingFallbackStorage returns true if passwords are stored in encrypted files
+// instead of the native OS keyring
+func (m *Manager) IsUsingFallbackStorage() bool {
+	if m.passwordStore == nil {
+		return false
+	}
+	return m.passwordStore.IsUsingFallback()
 }
 
 // Load loads connection history from YAML file
@@ -73,13 +104,20 @@ func (m *Manager) Save() error {
 	return nil
 }
 
+// AddResult contains the result of adding a connection
+type AddResult struct {
+	PasswordSaveError error
+}
+
 // Add adds or updates a connection in history
-func (m *Manager) Add(config models.ConnectionConfig) error {
+func (m *Manager) Add(config models.ConnectionConfig) (*AddResult, error) {
+	result := &AddResult{}
+
 	// Save password to secure keyring (if provided)
 	if config.Password != "" && m.passwordStore != nil {
 		if err := m.passwordStore.Save(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
-			// Log error but don't fail - password storage is optional
-			fmt.Printf("Warning: Failed to save password to keyring: %v\n", err)
+			// Store the error but don't fail - caller can decide how to handle
+			result.PasswordSaveError = err
 		}
 	}
 
@@ -97,7 +135,7 @@ func (m *Manager) Add(config models.ConnectionConfig) error {
 			if config.Name != "" {
 				m.history[i].Name = config.Name
 			}
-			return m.Save()
+			return result, m.Save()
 		}
 	}
 
@@ -122,7 +160,7 @@ func (m *Manager) Add(config models.ConnectionConfig) error {
 
 	m.history = append(m.history, entry)
 
-	return m.Save()
+	return result, m.Save()
 }
 
 // GetAll returns all connection history entries
@@ -177,17 +215,50 @@ func (m *Manager) Delete(id string) error {
 	return fmt.Errorf("connection history entry with ID '%s' not found", id)
 }
 
-// GetConnectionConfigWithPassword returns a ConnectionConfig with password retrieved from keyring
-func (m *Manager) GetConnectionConfigWithPassword(entry *models.ConnectionHistoryEntry) models.ConnectionConfig {
+// GetConnectionConfigWithPassword returns a ConnectionConfig with password retrieved from keyring.
+// If password retrieval fails, PasswordMissing will be true and the caller should prompt for password.
+func (m *Manager) GetConnectionConfigWithPassword(entry *models.ConnectionHistoryEntry) ConnectionConfigResult {
 	config := entry.ToConnectionConfig()
 
-	// Try to get password from keyring
-	if m.passwordStore != nil {
-		password, err := m.passwordStore.Get(entry.Host, entry.Port, entry.Database, entry.User)
-		if err == nil {
-			config.Password = password
+	if m.passwordStore == nil {
+		return ConnectionConfigResult{
+			Config:          config,
+			PasswordMissing: true,
+			Error:           fmt.Errorf("password store not initialized"),
 		}
 	}
 
-	return config
+	password, err := m.passwordStore.Get(entry.Host, entry.Port, entry.Database, entry.User)
+	if err != nil {
+		if errors.Is(err, ErrPasswordNotFound) {
+			return ConnectionConfigResult{
+				Config:          config,
+				PasswordMissing: true,
+			}
+		}
+		return ConnectionConfigResult{
+			Config:          config,
+			PasswordMissing: true,
+			Error:           err,
+		}
+	}
+
+	// Empty password also means missing (user might need to enter it)
+	if password == "" {
+		return ConnectionConfigResult{
+			Config:          config,
+			PasswordMissing: true,
+		}
+	}
+
+	config.Password = password
+	return ConnectionConfigResult{Config: config}
+}
+
+// SavePassword saves a password for an existing connection
+func (m *Manager) SavePassword(host string, port int, database, user, password string) error {
+	if m.passwordStore == nil {
+		return fmt.Errorf("password store not initialized")
+	}
+	return m.passwordStore.Save(host, port, database, user, password)
 }

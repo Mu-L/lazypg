@@ -98,6 +98,11 @@ type App struct {
 	// Connection history
 	connectionHistory *connection_history.Manager
 
+	// Password dialog for missing passwords
+	showPasswordDialog    bool
+	passwordDialog        *components.PasswordDialog
+	pendingConnectionInfo *models.ConnectionHistoryEntry
+
 	// Search input
 	showSearch  bool
 	searchInput *components.SearchInput
@@ -330,6 +335,7 @@ func New(cfg *config.Config) *App {
 		favoritesManager:  favoritesManager,
 		favoritesDialog:   favoritesDialog,
 		connectionHistory: connectionHistory,
+		passwordDialog:    components.NewPasswordDialog(th),
 		showSearch:        false,
 		searchInput:       searchInput,
 		executeSpinner:    s,
@@ -588,6 +594,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showError = false
 		return a, nil
 
+	case components.PasswordSubmitMsg:
+		// User submitted password from password dialog
+		a.showPasswordDialog = false
+		if a.pendingConnectionInfo != nil {
+			// Create connection config with the entered password
+			config := a.pendingConnectionInfo.ToConnectionConfig()
+			config.Password = msg.Password
+
+			// Try to save the password for future use
+			if a.connectionHistory != nil {
+				if err := a.connectionHistory.SavePassword(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
+					log.Printf("Warning: Failed to save password: %v", err)
+				}
+			}
+
+			a.pendingConnectionInfo = nil
+			return a.performConnection(config)
+		}
+		return a, nil
+
+	case components.PasswordCancelMsg:
+		// User cancelled password dialog
+		a.showPasswordDialog = false
+		a.pendingConnectionInfo = nil
+		// Re-show connection dialog
+		a.showConnectionDialog = true
+		return a, nil
+
 	case components.CloseCommandPaletteMsg:
 		a.showCommandPalette = false
 		return a, nil
@@ -783,6 +817,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle connection dialog if visible
 		if a.showConnectionDialog {
 			return a.handleConnectionDialog(msg)
+		}
+
+		// Handle password dialog if visible
+		if a.showPasswordDialog {
+			var cmd tea.Cmd
+			a.passwordDialog, cmd = a.passwordDialog.Update(msg)
+			return a, cmd
 		}
 
 		// Handle command palette if visible
@@ -1724,6 +1765,11 @@ func (a *App) View() string {
 	// If connection dialog is showing, render it with zone.Scan for mouse support
 	if a.showConnectionDialog {
 		return zone.Scan(a.renderConnectionDialog())
+	}
+
+	// If password dialog is showing, render it
+	if a.showPasswordDialog {
+		return zone.Scan(a.renderPasswordDialog())
 	}
 
 	// If in help mode, show help overlay
@@ -2749,7 +2795,18 @@ func (a *App) connectToHistoryEntry(entry models.ConnectionHistoryEntry) (tea.Mo
 
 	// Convert history entry to connection config WITH password from keyring
 	if a.connectionHistory != nil {
-		config = a.connectionHistory.GetConnectionConfigWithPassword(&entry)
+		result := a.connectionHistory.GetConnectionConfigWithPassword(&entry)
+		config = result.Config
+
+		// If password is missing, show password dialog
+		if result.PasswordMissing {
+			entryCopy := entry
+			a.pendingConnectionInfo = &entryCopy
+			a.passwordDialog.SetConnectionInfo(entry.Host, entry.Port, entry.Database, entry.User)
+			a.showPasswordDialog = true
+			a.showConnectionDialog = false
+			return a, a.passwordDialog.Init()
+		}
 	} else {
 		config = entry.ToConnectionConfig()
 	}
@@ -2799,9 +2856,13 @@ func (a *App) performConnection(config models.ConnectionConfig) (tea.Model, tea.
 
 	// Save to connection history (ignore errors)
 	if a.connectionHistory != nil {
-		if err := a.connectionHistory.Add(config); err != nil {
+		result, err := a.connectionHistory.Add(config)
+		if err != nil {
 			log.Printf("Warning: Failed to save connection to history: %v", err)
 		} else {
+			if result != nil && result.PasswordSaveError != nil {
+				log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
+			}
 			// Reload history in dialog
 			history := a.connectionHistory.GetRecent(10)
 			a.connectionDialog.SetHistoryEntries(history)
@@ -2965,9 +3026,13 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// Save to connection history (ignore errors)
 			if a.connectionHistory != nil {
-				if err := a.connectionHistory.Add(config); err != nil {
+				result, err := a.connectionHistory.Add(config)
+				if err != nil {
 					log.Printf("Warning: Failed to save connection to history: %v", err)
 				} else {
+					if result != nil && result.PasswordSaveError != nil {
+						log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
+					}
 					// Reload history in dialog
 					history := a.connectionHistory.GetRecent(10)
 					a.connectionDialog.SetHistoryEntries(history)
@@ -2993,7 +3058,18 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 				// Convert history entry to connection config WITH password from keyring
 				if a.connectionHistory != nil {
-					config = a.connectionHistory.GetConnectionConfigWithPassword(historyEntry)
+					result := a.connectionHistory.GetConnectionConfigWithPassword(historyEntry)
+					config = result.Config
+
+					// If password is missing, show password dialog
+					if result.PasswordMissing {
+						entryCopy := *historyEntry
+						a.pendingConnectionInfo = &entryCopy
+						a.passwordDialog.SetConnectionInfo(historyEntry.Host, historyEntry.Port, historyEntry.Database, historyEntry.User)
+						a.showPasswordDialog = true
+						a.showConnectionDialog = false
+						return a, a.passwordDialog.Init()
+					}
 				} else {
 					config = historyEntry.ToConnectionConfig()
 				}
@@ -3045,9 +3121,13 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// Save to connection history (ignore errors)
 			if a.connectionHistory != nil {
-				if err := a.connectionHistory.Add(config); err != nil {
+				result, err := a.connectionHistory.Add(config)
+				if err != nil {
 					log.Printf("Warning: Failed to save connection to history: %v", err)
 				} else {
+					if result != nil && result.PasswordSaveError != nil {
+						log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
+					}
 					// Reload history in dialog
 					history := a.connectionHistory.GetRecent(10)
 					a.connectionDialog.SetHistoryEntries(history)
@@ -3305,6 +3385,33 @@ func (a *App) renderConnectionDialog() string {
 	a.connectionDialog.Height = dialogHeight
 
 	dialog := a.connectionDialog.View()
+
+	// Center it
+	verticalPadding := (a.state.Height - dialogHeight) / 2
+	horizontalPadding := (a.state.Width - dialogWidth) / 2
+
+	if verticalPadding < 0 {
+		verticalPadding = 0
+	}
+	if horizontalPadding < 0 {
+		horizontalPadding = 0
+	}
+
+	style := lipgloss.NewStyle().
+		Padding(verticalPadding, 0, 0, horizontalPadding)
+
+	return style.Render(dialog)
+}
+
+func (a *App) renderPasswordDialog() string {
+	// Center the dialog
+	dialogWidth := 50
+	dialogHeight := 12
+
+	a.passwordDialog.Width = dialogWidth
+	a.passwordDialog.Height = dialogHeight
+
+	dialog := a.passwordDialog.View()
 
 	// Center it
 	verticalPadding := (a.state.Height - dialogHeight) / 2
