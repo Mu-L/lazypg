@@ -1,28 +1,101 @@
 package connection_history
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 
-	"github.com/zalando/go-keyring"
+	"github.com/99designs/keyring"
 )
 
-const (
-	serviceName = "lazypg"
-)
+const serviceName = "lazypg"
 
-// PasswordStore handles secure password storage using OS keyring
+// PasswordStore handles secure password storage using OS keyring with file fallback
 type PasswordStore struct {
-	service string
+	ring          keyring.Keyring
+	usingFallback bool
 }
 
-// NewPasswordStore creates a new password store
-func NewPasswordStore() *PasswordStore {
+// NewPasswordStore creates a new password store with platform-appropriate backends
+func NewPasswordStore(configDir string) (*PasswordStore, error) {
+	backends := getBackendsForPlatform()
+	fileDir := filepath.Join(configDir, "keyring")
+
+	ring, err := keyring.Open(keyring.Config{
+		ServiceName:     serviceName,
+		AllowedBackends: backends,
+		// File backend configuration
+		FileDir: fileDir,
+		FilePasswordFunc: func(_ string) (string, error) {
+			return deriveFilePassword()
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open keyring: %w", err)
+	}
+
+	// Check if we're using the file backend (fallback)
+	usingFallback := isUsingFallback(backends, ring)
+
 	return &PasswordStore{
-		service: serviceName,
+		ring:          ring,
+		usingFallback: usingFallback,
+	}, nil
+}
+
+// getBackendsForPlatform returns the appropriate backend priority for the current OS
+func getBackendsForPlatform() []keyring.BackendType {
+	switch runtime.GOOS {
+	case "darwin":
+		return []keyring.BackendType{
+			keyring.KeychainBackend,
+			keyring.FileBackend,
+		}
+	case "linux":
+		return []keyring.BackendType{
+			keyring.SecretServiceBackend,
+			keyring.KWalletBackend,
+			keyring.FileBackend,
+		}
+	case "windows":
+		return []keyring.BackendType{
+			keyring.WinCredBackend,
+			keyring.FileBackend,
+		}
+	default:
+		return []keyring.BackendType{
+			keyring.FileBackend,
+		}
 	}
 }
 
-// Save stores a password securely in the OS keyring
+// isUsingFallback checks if the opened keyring is using the file backend
+func isUsingFallback(requestedBackends []keyring.BackendType, ring keyring.Keyring) bool {
+	// If file backend is the only option, we're using fallback
+	if len(requestedBackends) == 1 && requestedBackends[0] == keyring.FileBackend {
+		return true
+	}
+
+	// Try to detect by checking available backends
+	availableBackends := keyring.AvailableBackends()
+	for _, b := range availableBackends {
+		if b != keyring.FileBackend {
+			// A native backend is available, likely not using fallback
+			return false
+		}
+	}
+
+	return true
+}
+
+// IsUsingFallback returns true if the password store is using the file backend
+// instead of the native OS keyring
+func (ps *PasswordStore) IsUsingFallback() bool {
+	return ps.usingFallback
+}
+
+// Save stores a password securely in the keyring
 // key format: "host:port:database:user" for uniqueness
 func (ps *PasswordStore) Save(host string, port int, database, user, password string) error {
 	if password == "" {
@@ -31,28 +104,39 @@ func (ps *PasswordStore) Save(host string, port int, database, user, password st
 	}
 
 	key := makeKey(host, port, database, user)
-	return keyring.Set(ps.service, key, password)
+	err := ps.ring.Set(keyring.Item{
+		Key:         key,
+		Data:        []byte(password),
+		Label:       fmt.Sprintf("lazypg: %s@%s:%d/%s", user, host, port, database),
+		Description: "PostgreSQL connection password for lazypg",
+	})
+	if err != nil {
+		return &PasswordSaveError{
+			Err:     err,
+			Message: "failed to save password to keyring",
+		}
+	}
+	return nil
 }
 
-// Get retrieves a password from the OS keyring
+// Get retrieves a password from the keyring
 func (ps *PasswordStore) Get(host string, port int, database, user string) (string, error) {
 	key := makeKey(host, port, database, user)
-	password, err := keyring.Get(ps.service, key)
+	item, err := ps.ring.Get(key)
 	if err != nil {
-		// Password not found is not an error, just return empty
-		if err == keyring.ErrNotFound {
-			return "", nil
+		if errors.Is(err, keyring.ErrKeyNotFound) {
+			return "", ErrPasswordNotFound
 		}
-		return "", fmt.Errorf("failed to get password from keyring: %w", err)
+		return "", &PasswordReadError{Err: err}
 	}
-	return password, nil
+	return string(item.Data), nil
 }
 
-// Delete removes a password from the OS keyring
+// Delete removes a password from the keyring
 func (ps *PasswordStore) Delete(host string, port int, database, user string) error {
 	key := makeKey(host, port, database, user)
-	err := keyring.Delete(ps.service, key)
-	if err != nil && err != keyring.ErrNotFound {
+	err := ps.ring.Remove(key)
+	if err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
 		return fmt.Errorf("failed to delete password from keyring: %w", err)
 	}
 	return nil
