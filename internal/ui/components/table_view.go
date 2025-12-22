@@ -335,6 +335,36 @@ func (tv *TableView) calculateVisibleCols(width int) {
 	tv.VisibleCols = count
 }
 
+// tableLoadingState returns the loading state view for initial table data load
+func (tv *TableView) tableLoadingState(width, height int) string {
+	spinnerView := ""
+	if tv.Spinner != nil {
+		spinnerView = tv.Spinner.View() + " "
+	}
+
+	elapsed := time.Since(tv.LoadingStart)
+	elapsedStr := fmt.Sprintf("(%.1fs)", elapsed.Seconds())
+
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Foreground)
+
+	elapsedStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Metadata)
+
+	cancelHint := lipgloss.NewStyle().
+		Foreground(tv.Theme.Border).
+		Render("Press Esc to cancel")
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		spinnerView+loadingStyle.Render("Loading table data...")+elapsedStyle.Render(" "+elapsedStr),
+		"",
+		cancelHint,
+	)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
 // View renders the table
 func (tv *TableView) View() string {
 	// Select container style based on focus
@@ -347,6 +377,12 @@ func (tv *TableView) View() string {
 	// tv.Width/tv.Height are the total available space including border
 	contentWidth := tv.Width - containerStyle.GetHorizontalFrameSize()
 	contentHeight := tv.Height - containerStyle.GetVerticalFrameSize()
+
+	// Show loading state for initial table load
+	if tv.IsLoading {
+		loadingContent := tv.tableLoadingState(contentWidth, contentHeight)
+		return containerStyle.Width(contentWidth).Height(contentHeight).Render(loadingContent)
+	}
 
 	if len(tv.Columns) == 0 {
 		return containerStyle.Width(contentWidth).Height(contentHeight).Render("No data")
