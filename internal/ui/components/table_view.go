@@ -635,6 +635,16 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 }
 
 func (tv *TableView) renderStatus() string {
+	// Show pagination loading indicator
+	if tv.IsPaginating {
+		spinnerView := ""
+		if tv.Spinner != nil {
+			spinnerView = tv.Spinner.View() + " "
+		}
+		paginatingText := spinnerView + "Loading..."
+		return tv.cachedStyles.status.Render(paginatingText)
+	}
+
 	endRow := tv.TopRow + len(tv.Rows)
 	if endRow > tv.TotalRows {
 		endRow = tv.TotalRows
