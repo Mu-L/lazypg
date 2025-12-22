@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/mattn/go-runewidth"
@@ -66,6 +67,12 @@ type TableView struct {
 	PendingCount     string    // Number prefix buffer (e.g., "42")
 	PendingCountTime time.Time // Last input time for timeout
 	PendingG         bool      // Waiting for second 'g' in 'gg'
+
+	// Loading state
+	IsLoading     bool           // True when first loading table data
+	IsPaginating  bool           // True when loading more rows (pagination)
+	LoadingStart  time.Time      // When loading started
+	Spinner       *spinner.Model // Shared spinner instance
 
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *tableViewStyles
