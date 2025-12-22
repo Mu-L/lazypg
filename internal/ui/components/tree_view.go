@@ -261,6 +261,11 @@ func (tv *TreeView) View() string {
 		// Use visible row index (i - startIdx) for zone ID
 		zoneID := fmt.Sprintf("%s%d", ZoneTreeRowPrefix, i-startIdx)
 		lines = append(lines, zone.Mark(zoneID, line))
+
+		// If this node is loading, show inline loading indicator after it
+		if tv.LoadingNodeID != "" && node.ID == tv.LoadingNodeID {
+			lines = append(lines, tv.inlineLoadingNode(node))
+		}
 	}
 
 	// Add scroll indicator line if needed
@@ -790,6 +795,31 @@ func (tv *TreeView) loadingState() string {
 	)
 
 	return lipgloss.Place(tv.Width, tv.Height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// inlineLoadingNode returns a loading indicator for a specific node
+func (tv *TreeView) inlineLoadingNode(node *models.TreeNode) string {
+	// Calculate indentation
+	depth := node.GetDepth() - 1
+	if depth < 0 {
+		depth = 0
+	}
+	indent := strings.Repeat("  ", depth+1) // Extra indent for child position
+
+	spinnerView := ""
+	if tv.Spinner != nil {
+		spinnerView = tv.Spinner.View()
+	}
+
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Comment).
+		Italic(true)
+
+	content := fmt.Sprintf("%s%s %s", indent, spinnerView, loadingStyle.Render("Loading..."))
+
+	maxWidth := tv.Width - 2
+	style := lipgloss.NewStyle().Width(maxWidth)
+	return style.Render(content)
 }
 
 // noMatchesState returns the no matches view
