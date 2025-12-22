@@ -390,8 +390,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouseEvent(msg)
 
 	case spinner.TickMsg:
-		// Update spinner when there's a pending query or tree is loading
-		if a.resultTabs.HasPendingQuery() || a.treeView.IsLoading || a.treeView.LoadingNodeID != "" {
+		// Update spinner when there's a pending query, tree or table is loading
+		needsSpinner := a.resultTabs.HasPendingQuery() ||
+			a.treeView.IsLoading ||
+			a.treeView.LoadingNodeID != "" ||
+			a.tableView.IsPaginating
+
+		// Also check active tab's table view
+		if activeTab := a.resultTabs.GetActiveTab(); activeTab != nil {
+			if sv := activeTab.Structure; sv != nil {
+				if tv := sv.GetTableView(); tv != nil && tv.IsLoading {
+					needsSpinner = true
+				}
+			}
+		}
+
+		if needsSpinner {
 			var cmd tea.Cmd
 			a.executeSpinner, cmd = a.executeSpinner.Update(msg)
 			return a, cmd
@@ -1498,7 +1512,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !existingFound {
 				// Create new StructureView for this table
 				tableView := components.NewTableView(a.theme)
+				tableView.Spinner = &a.executeSpinner
 				structureView := components.NewStructureView(a.theme, tableView)
+
+				// Set loading state
+				tableView.IsLoading = true
+				tableView.LoadingStart = time.Now()
 
 				// Add as a new tab
 				a.resultTabs.AddTableData(objectID, msg.Node.Label, structureView)
@@ -1669,9 +1688,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tableView.Rows = append(a.tableView.Rows, msg.Rows...)
 			a.tableView.TotalRows = msg.TotalRows
 		}
+		a.tableView.IsPaginating = false
 		return a, nil
 
 	case TabTableDataLoadedMsg:
+		// Clear loading state for the tab's table view
+		if tab := a.resultTabs.GetTabByObjectID(msg.ObjectID); tab != nil {
+			if sv := tab.Structure; sv != nil {
+				if tv := sv.GetTableView(); tv != nil {
+					tv.IsLoading = false
+				}
+			}
+		}
+
 		if msg.Err != nil {
 			a.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
 			return a, nil
@@ -1725,6 +1754,8 @@ func (a *App) checkLazyLoad() tea.Cmd {
 	if a.tableView.SelectedRow >= len(a.tableView.Rows)-10 &&
 		len(a.tableView.Rows) < a.tableView.TotalRows &&
 		a.currentTable != "" {
+		// Set pagination loading state
+		a.tableView.IsPaginating = true
 		// Parse schema and table from currentTable
 		parts := strings.Split(a.currentTable, ".")
 		if len(parts) == 2 {
