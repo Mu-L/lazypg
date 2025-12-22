@@ -415,6 +415,16 @@ func (rt *ResultTabs) GetAllTabs() []*ResultTab {
 	return rt.tabs
 }
 
+// GetTabByObjectID returns a tab by its object ID
+func (rt *ResultTabs) GetTabByObjectID(objectID string) *ResultTab {
+	for _, tab := range rt.tabs {
+		if tab.ObjectID == objectID {
+			return tab
+		}
+	}
+	return nil
+}
+
 // HasTabs returns whether there are any tabs
 func (rt *ResultTabs) HasTabs() bool {
 	return len(rt.tabs) > 0
