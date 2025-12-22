@@ -178,6 +178,11 @@ func (tv *TreeView) applyFilter() {
 
 // View renders the tree as a string
 func (tv *TreeView) View() string {
+	// Show loading state for initial tree load
+	if tv.IsLoading && tv.Root == nil {
+		return tv.loadingState()
+	}
+
 	if tv.Root == nil {
 		return tv.emptyState()
 	}
@@ -760,6 +765,31 @@ func (tv *TreeView) emptyState() string {
 		Align(lipgloss.Center)
 
 	return style.Render("No databases connected")
+}
+
+// loadingState returns the loading state view for initial tree loading
+func (tv *TreeView) loadingState() string {
+	spinnerView := ""
+	if tv.Spinner != nil {
+		spinnerView = tv.Spinner.View() + " "
+	}
+
+	elapsed := time.Since(tv.LoadingStart)
+	elapsedStr := fmt.Sprintf("(%.1fs)", elapsed.Seconds())
+
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Foreground)
+
+	elapsedStyle := lipgloss.NewStyle().
+		Foreground(tv.Theme.Metadata)
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		spinnerView+loadingStyle.Render("Loading databases...")+elapsedStyle.Render(" "+elapsedStr),
+		"",
+	)
+
+	return lipgloss.Place(tv.Width, tv.Height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // noMatchesState returns the no matches view
