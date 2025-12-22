@@ -351,6 +351,9 @@ func New(cfg *config.Config) *App {
 		},
 	}
 
+	// Share spinner with TreeView
+	app.treeView.Spinner = &app.executeSpinner
+
 	// Set initial panel dimensions and styles
 	app.updatePanelDimensions()
 	app.updatePanelStyles()
@@ -387,8 +390,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouseEvent(msg)
 
 	case spinner.TickMsg:
-		// Update spinner when there's a pending query
-		if a.resultTabs.HasPendingQuery() {
+		// Update spinner when there's a pending query or tree is loading
+		if a.resultTabs.HasPendingQuery() || a.treeView.IsLoading || a.treeView.LoadingNodeID != "" {
 			var cmd tea.Cmd
 			a.executeSpinner, cmd = a.executeSpinner.Update(msg)
 			return a, cmd
@@ -1424,9 +1427,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case LoadTreeMsg:
-		return a, a.loadTree
+		a.treeView.IsLoading = true
+		a.treeView.LoadingStart = time.Now()
+		return a, tea.Batch(a.loadTree, a.executeSpinner.Tick)
 
 	case TreeLoadedMsg:
+		a.treeView.IsLoading = false
+		a.treeView.LoadingNodeID = ""
 		if msg.Err != nil {
 			a.ShowError("Database Error", fmt.Sprintf("Failed to load database structure:\n\n%v", msg.Err))
 			return a, nil
