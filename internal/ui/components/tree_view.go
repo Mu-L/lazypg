@@ -29,7 +29,9 @@ package components
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
@@ -65,6 +67,12 @@ type TreeView struct {
 	SearchQuery    string                     // Current search query text
 	FilteredNodes  []*models.TreeNode         // Flat list of nodes matching filter
 	MatchPositions map[*models.TreeNode][]int // Match positions for highlighting
+
+	// Loading state
+	IsLoading      bool           // True when initial tree is loading
+	LoadingNodeID  string         // ID of node currently loading children (for inline spinner)
+	LoadingStart   time.Time      // When loading started (for elapsed time)
+	Spinner        *spinner.Model // Shared spinner instance
 }
 
 // TreeNodeSelectedMsg is sent when a node is selected (Enter key)
