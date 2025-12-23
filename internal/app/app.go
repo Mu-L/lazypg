@@ -1443,6 +1443,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LoadTreeMsg:
 		a.treeView.IsLoading = true
 		a.treeView.LoadingStart = time.Now()
+		a.treeView.Root = nil // Clear root to show loading state
 		return a, tea.Batch(a.loadTree, a.executeSpinner.Tick)
 
 	case TreeLoadedMsg:
