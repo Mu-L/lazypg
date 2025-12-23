@@ -1567,8 +1567,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Add as a new tab
 				a.resultTabs.AddTableData(objectID, msg.Node.Label, structureView)
 
-				// Load table data asynchronously
-				return a, a.loadTableDataForTab(schemaName, msg.Node.Label, objectID)
+				// Switch focus immediately to show loading state
+				a.state.FocusArea = models.FocusDataPanel
+				a.updatePanelStyles()
+
+				// Load table data asynchronously and start spinner tick
+				return a, tea.Batch(
+					a.loadTableDataForTab(schemaName, msg.Node.Label, objectID),
+					a.executeSpinner.Tick,
+				)
 			}
 			return a, nil
 
