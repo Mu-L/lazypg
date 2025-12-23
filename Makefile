@@ -1,10 +1,11 @@
-.PHONY: build run test clean install help
+.PHONY: build run test clean install help sign
 
 # Build variables
 BINARY_NAME=lazypg
 BUILD_DIR=bin
 VERSION?=dev
 LDFLAGS=-ldflags "-X main.version=${VERSION}"
+UNAME_S := $(shell uname -s)
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -12,11 +13,23 @@ help: ## Show this help message
 	@echo 'Available targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Build the binary
+build: ## Build the binary (with code signing on macOS)
 	@echo "Building ${BINARY_NAME}..."
 	@mkdir -p ${BUILD_DIR}
 	@go build ${LDFLAGS} -o ${BUILD_DIR}/${BINARY_NAME} cmd/lazypg/main.go
+ifeq ($(UNAME_S),Darwin)
+	@echo "Signing binary for macOS keychain compatibility..."
+	@codesign -s - -f ${BUILD_DIR}/${BINARY_NAME}
+endif
 	@echo "Built ${BUILD_DIR}/${BINARY_NAME}"
+
+sign: ## Sign the binary (macOS only, for keychain "Always Allow")
+ifeq ($(UNAME_S),Darwin)
+	@codesign -s - -f ${BUILD_DIR}/${BINARY_NAME}
+	@echo "Signed ${BUILD_DIR}/${BINARY_NAME}"
+else
+	@echo "Code signing is only needed on macOS"
+endif
 
 run: build ## Build and run the application
 	@${BUILD_DIR}/${BINARY_NAME}
@@ -32,8 +45,11 @@ clean: ## Remove build artifacts
 	@rm -f coverage.out
 	@echo "Cleaned build artifacts"
 
-install: build ## Install binary to $GOPATH/bin
+install: build ## Install binary to $GOPATH/bin (with code signing on macOS)
 	@go install ./cmd/lazypg
+ifeq ($(UNAME_S),Darwin)
+	@codesign -s - -f $(shell go env GOPATH)/bin/${BINARY_NAME}
+endif
 	@echo "Installed to $(shell go env GOPATH)/bin/${BINARY_NAME}"
 
 fmt: ## Format code
