@@ -185,6 +185,18 @@ type TreeLoadedMsg struct {
 	Err  error
 }
 
+// LoadNodeChildrenMsg requests loading children for a tree node
+type LoadNodeChildrenMsg struct {
+	NodeID string
+}
+
+// NodeChildrenLoadedMsg is sent when node children are loaded
+type NodeChildrenLoadedMsg struct {
+	NodeID   string
+	Children []*models.TreeNode
+	Err      error
+}
+
 // LoadTableDataMsg requests loading table data
 type LoadTableDataMsg struct {
 	Schema     string
