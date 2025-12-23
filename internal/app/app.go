@@ -1537,14 +1537,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update tree view with loaded data
 		a.treeView.Root = msg.Root
 
-		// Auto-expand to schema level: Root -> Database -> Schemas
+		// Auto-expand: Root -> Database -> only "public" schema (skip extensions)
 		if msg.Root != nil {
 			msg.Root.Expanded = true
 			for _, dbNode := range msg.Root.Children {
 				dbNode.Expanded = true
-				// Expand each schema node
-				for _, schemaNode := range dbNode.Children {
-					schemaNode.Expanded = true
+				// Only expand "public" schema, skip extensions group
+				for _, child := range dbNode.Children {
+					if child.Type == models.TreeNodeTypeSchema && child.Label == "public" {
+						child.Expanded = true
+					}
+					// Extensions group and other schemas remain collapsed
 				}
 			}
 		}
