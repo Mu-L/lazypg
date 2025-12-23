@@ -94,6 +94,29 @@ type RangeType struct {
 	Subtype string
 }
 
+// SchemaObjectCounts holds the count of each object type in a schema
+type SchemaObjectCounts struct {
+	SchemaName        string
+	Tables            int
+	Views             int
+	MaterializedViews int
+	Sequences         int
+	Functions         int
+	Procedures        int
+	TriggerFunctions  int
+	CompositeTypes    int
+	EnumTypes         int
+	DomainTypes       int
+	RangeTypes        int
+}
+
+// TotalObjects returns the total count of all objects in the schema
+func (s *SchemaObjectCounts) TotalObjects() int {
+	return s.Tables + s.Views + s.MaterializedViews + s.Sequences +
+		s.Functions + s.Procedures + s.TriggerFunctions +
+		s.CompositeTypes + s.EnumTypes + s.DomainTypes + s.RangeTypes
+}
+
 // ListMaterializedViews returns all materialized views in a schema
 func ListMaterializedViews(ctx context.Context, pool *connection.Pool, schema string) ([]MaterializedView, error) {
 	query := `
@@ -740,6 +763,92 @@ func GetDomainTypeDetails(ctx context.Context, pool *connection.Pool, schema, na
 	}
 
 	return details, nil
+}
+
+// GetSchemaObjectCounts returns object counts for all schemas in one query
+func GetSchemaObjectCounts(ctx context.Context, pool *connection.Pool) ([]SchemaObjectCounts, error) {
+	query := `
+		WITH class_counts AS (
+			SELECT
+				n.nspname AS schema_name,
+				SUM(CASE WHEN c.relkind = 'r' THEN 1 ELSE 0 END) AS tables,
+				SUM(CASE WHEN c.relkind = 'v' THEN 1 ELSE 0 END) AS views,
+				SUM(CASE WHEN c.relkind = 'm' THEN 1 ELSE 0 END) AS mat_views,
+				SUM(CASE WHEN c.relkind = 'S' THEN 1 ELSE 0 END) AS sequences
+			FROM pg_namespace n
+			LEFT JOIN pg_class c ON c.relnamespace = n.oid
+			WHERE n.nspname NOT LIKE 'pg_%'
+			  AND n.nspname != 'information_schema'
+			GROUP BY n.nspname
+		),
+		proc_counts AS (
+			SELECT
+				n.nspname AS schema_name,
+				SUM(CASE WHEN p.prokind = 'f' AND p.prorettype != 'trigger'::regtype THEN 1 ELSE 0 END) AS functions,
+				SUM(CASE WHEN p.prokind = 'p' THEN 1 ELSE 0 END) AS procedures,
+				SUM(CASE WHEN p.prorettype = 'trigger'::regtype THEN 1 ELSE 0 END) AS trigger_funcs
+			FROM pg_namespace n
+			LEFT JOIN pg_proc p ON p.pronamespace = n.oid
+			WHERE n.nspname NOT LIKE 'pg_%'
+			  AND n.nspname != 'information_schema'
+			GROUP BY n.nspname
+		),
+		type_counts AS (
+			SELECT
+				n.nspname AS schema_name,
+				SUM(CASE WHEN t.typtype = 'c' THEN 1 ELSE 0 END) AS composite_types,
+				SUM(CASE WHEN t.typtype = 'e' THEN 1 ELSE 0 END) AS enum_types,
+				SUM(CASE WHEN t.typtype = 'd' THEN 1 ELSE 0 END) AS domain_types,
+				SUM(CASE WHEN t.typtype = 'r' THEN 1 ELSE 0 END) AS range_types
+			FROM pg_namespace n
+			LEFT JOIN pg_type t ON t.typnamespace = n.oid
+			WHERE n.nspname NOT LIKE 'pg_%'
+			  AND n.nspname != 'information_schema'
+			GROUP BY n.nspname
+		)
+		SELECT
+			c.schema_name,
+			COALESCE(c.tables, 0) AS tables,
+			COALESCE(c.views, 0) AS views,
+			COALESCE(c.mat_views, 0) AS mat_views,
+			COALESCE(c.sequences, 0) AS sequences,
+			COALESCE(p.functions, 0) AS functions,
+			COALESCE(p.procedures, 0) AS procedures,
+			COALESCE(p.trigger_funcs, 0) AS trigger_funcs,
+			COALESCE(t.composite_types, 0) AS composite_types,
+			COALESCE(t.enum_types, 0) AS enum_types,
+			COALESCE(t.domain_types, 0) AS domain_types,
+			COALESCE(t.range_types, 0) AS range_types
+		FROM class_counts c
+		LEFT JOIN proc_counts p ON c.schema_name = p.schema_name
+		LEFT JOIN type_counts t ON c.schema_name = t.schema_name
+		ORDER BY c.schema_name;
+	`
+
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema object counts: %w", err)
+	}
+
+	counts := make([]SchemaObjectCounts, 0, len(rows))
+	for _, row := range rows {
+		counts = append(counts, SchemaObjectCounts{
+			SchemaName:        toString(row["schema_name"]),
+			Tables:            int(toInt64(row["tables"])),
+			Views:             int(toInt64(row["views"])),
+			MaterializedViews: int(toInt64(row["mat_views"])),
+			Sequences:         int(toInt64(row["sequences"])),
+			Functions:         int(toInt64(row["functions"])),
+			Procedures:        int(toInt64(row["procedures"])),
+			TriggerFunctions:  int(toInt64(row["trigger_funcs"])),
+			CompositeTypes:    int(toInt64(row["composite_types"])),
+			EnumTypes:         int(toInt64(row["enum_types"])),
+			DomainTypes:       int(toInt64(row["domain_types"])),
+			RangeTypes:        int(toInt64(row["range_types"])),
+		})
+	}
+
+	return counts, nil
 }
 
 // Helper functions for type conversion
