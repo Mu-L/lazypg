@@ -113,21 +113,13 @@ type AddResult struct {
 func (m *Manager) Add(config models.ConnectionConfig) (*AddResult, error) {
 	result := &AddResult{}
 
-	// Save password to secure keyring (if provided)
-	if config.Password != "" && m.passwordStore != nil {
-		if err := m.passwordStore.Save(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
-			// Store the error but don't fail - caller can decide how to handle
-			result.PasswordSaveError = err
-		}
-	}
-
 	// Check if this connection already exists (match by host, port, database, user)
 	for i, entry := range m.history {
 		if entry.Host == config.Host &&
 			entry.Port == config.Port &&
 			entry.Database == config.Database &&
 			entry.User == config.User {
-			// Update existing entry
+			// Update existing entry - skip password save since it should already be in keyring
 			m.history[i].LastUsed = time.Now()
 			m.history[i].UsageCount++
 			m.history[i].SSLMode = config.SSLMode
@@ -136,6 +128,14 @@ func (m *Manager) Add(config models.ConnectionConfig) (*AddResult, error) {
 				m.history[i].Name = config.Name
 			}
 			return result, m.Save()
+		}
+	}
+
+	// For NEW connections, save password to secure keyring (if provided)
+	if config.Password != "" && m.passwordStore != nil {
+		if err := m.passwordStore.Save(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
+			// Store the error but don't fail - caller can decide how to handle
+			result.PasswordSaveError = err
 		}
 	}
 

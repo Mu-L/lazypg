@@ -25,6 +25,9 @@ func NewPasswordStore(configDir string) (*PasswordStore, error) {
 	ring, err := keyring.Open(keyring.Config{
 		ServiceName:     serviceName,
 		AllowedBackends: backends,
+		// macOS Keychain: trust the application to access items without prompts
+		// This makes "Always Allow" work correctly
+		KeychainTrustApplication: true,
 		// File backend configuration
 		FileDir: fileDir,
 		FilePasswordFunc: func(_ string) (string, error) {

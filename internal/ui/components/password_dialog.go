@@ -68,7 +68,8 @@ func (p *PasswordDialog) SetConnectionInfo(host string, port int, database, user
 	p.database = database
 	p.user = user
 	p.Title = "Password Required"
-	p.Description = fmt.Sprintf("Enter password for %s@%s:%d/%s", user, host, port, database)
+	// Description will be built in View() with proper formatting
+	p.Description = ""
 	p.input.SetValue("")
 	p.input.Focus()
 }
@@ -106,63 +107,68 @@ func (p *PasswordDialog) View() string {
 		return ""
 	}
 
-	// Title style
+	// Fixed dialog width for consistent layout
+	dialogWidth := 56
+	contentWidth := dialogWidth - 6 // account for border and padding
+
+	// Update input width to match content
+	p.input.Width = contentWidth - 4
+
+	// Styles
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(p.Theme.Info).
-		Padding(0, 1)
+		Foreground(p.Theme.Info)
 
-	// Description style
-	descStyle := lipgloss.NewStyle().
-		Foreground(p.Theme.Foreground).
-		Faint(true).
-		Padding(0, 1)
-
-	// Label style
 	labelStyle := lipgloss.NewStyle().
-		Foreground(p.Theme.Info).
-		Padding(0, 1)
+		Foreground(p.Theme.Metadata)
 
-	// Footer style
-	footerStyle := lipgloss.NewStyle().
+	valueStyle := lipgloss.NewStyle().
+		Foreground(p.Theme.Foreground)
+
+	inputLabelStyle := lipgloss.NewStyle().
+		Foreground(p.Theme.Info)
+
+	hintStyle := lipgloss.NewStyle().
 		Faint(true).
-		Foreground(p.Theme.Foreground).
-		Padding(0, 1)
+		Foreground(p.Theme.Metadata)
 
-	// Build content
-	var content strings.Builder
+	// Build content with fixed width centering
+	lineStyle := lipgloss.NewStyle().Width(contentWidth)
 
-	// Title
-	content.WriteString(titleStyle.Render(p.Title))
-	content.WriteString("\n\n")
+	var lines []string
 
-	// Description
-	content.WriteString(descStyle.Render(p.Description))
-	content.WriteString("\n\n")
+	// Title (centered)
+	lines = append(lines, lineStyle.Align(lipgloss.Center).Render(titleStyle.Render(p.Title)))
+	lines = append(lines, "")
+
+	// Connection info (two lines)
+	userLine := labelStyle.Render("User: ") + valueStyle.Render(p.user)
+	hostLine := labelStyle.Render("Host: ") + valueStyle.Render(fmt.Sprintf("%s:%d/%s", p.host, p.port, p.database))
+	lines = append(lines, lineStyle.Render(userLine))
+	lines = append(lines, lineStyle.Render(hostLine))
+	lines = append(lines, "")
 
 	// Password input
-	content.WriteString(labelStyle.Render("Password:"))
-	content.WriteString("\n")
-	content.WriteString("  ")
-	content.WriteString(p.input.View())
-	content.WriteString("\n\n")
+	lines = append(lines, lineStyle.Render(inputLabelStyle.Render("Password:")))
+	lines = append(lines, lineStyle.Render(" "+p.input.View()))
+	lines = append(lines, "")
 
-	// Footer with buttons
-	submitBtn := zone.Mark(ZonePasswordSubmit, footerStyle.Render("[Enter] Submit"))
-	cancelBtn := zone.Mark(ZonePasswordCancel, footerStyle.Render("[Esc] Cancel"))
-	content.WriteString(submitBtn)
-	content.WriteString("  ")
-	content.WriteString(cancelBtn)
+	// Footer with buttons (centered)
+	submitBtn := zone.Mark(ZonePasswordSubmit, "[Enter] Submit")
+	cancelBtn := zone.Mark(ZonePasswordCancel, "[Esc] Cancel")
+	footer := hintStyle.Render(submitBtn + "    " + cancelBtn)
+	lines = append(lines, lineStyle.Align(lipgloss.Center).Render(footer))
+
+	content := strings.Join(lines, "\n")
 
 	// Box style
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.Theme.Info).
+		BorderForeground(p.Theme.BorderFocused).
 		Padding(1, 2).
-		MaxWidth(p.Width).
-		Background(p.Theme.Background)
+		Width(dialogWidth)
 
-	return boxStyle.Render(content.String())
+	return boxStyle.Render(content)
 }
 
 // HandleMouseClick handles mouse click events

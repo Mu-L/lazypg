@@ -48,6 +48,9 @@ type App struct {
 	// Connection dialog
 	showConnectionDialog bool
 	connectionDialog     *components.ConnectionDialog
+	isConnecting         bool      // True when connection attempt is in progress
+	connectingStart      time.Time // When connection attempt started
+	connectingConfig     models.ConnectionConfig
 
 	// Error overlay
 	showError    bool
@@ -174,6 +177,18 @@ type DiscoveryCompleteMsg struct {
 type ErrorMsg struct {
 	Title   string
 	Message string
+}
+
+// ConnectionStartMsg starts an async connection
+type ConnectionStartMsg struct {
+	Config models.ConnectionConfig
+}
+
+// ConnectionResultMsg is sent when connection attempt completes
+type ConnectionResultMsg struct {
+	Config models.ConnectionConfig
+	ConnID string
+	Err    error
 }
 
 // LoadTreeMsg requests loading the navigation tree
@@ -402,11 +417,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouseEvent(msg)
 
 	case spinner.TickMsg:
-		// Update spinner when there's a pending query, tree or table is loading
+		// Update spinner when there's a pending query, tree or table is loading, or connecting
 		needsSpinner := a.resultTabs.HasPendingQuery() ||
 			a.treeView.IsLoading ||
 			a.treeView.LoadingNodeID != "" ||
-			a.tableView.IsPaginating
+			a.tableView.IsPaginating ||
+			a.isConnecting
 
 		// Also check active tab's table view
 		if activeTab := a.resultTabs.GetActiveTab(); activeTab != nil {
@@ -1451,6 +1467,59 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update connection dialog with discovered instances
 		a.connectionDialog.SetDiscoveredInstances(msg.Instances)
 		return a, nil
+
+	case ConnectionStartMsg:
+		// Start async connection
+		a.isConnecting = true
+		a.connectingStart = time.Now()
+		a.connectingConfig = msg.Config
+		return a, tea.Batch(a.connectAsync(msg.Config), a.executeSpinner.Tick)
+
+	case ConnectionResultMsg:
+		// Ignore result if user already cancelled
+		if !a.isConnecting {
+			return a, nil
+		}
+		a.isConnecting = false
+		if msg.Err != nil {
+			a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
+				msg.Config.Host, msg.Config.Port, msg.Err))
+			return a, nil
+		}
+
+		// Update active connection in state
+		conn, err := a.connectionManager.GetActive()
+		if err == nil && conn != nil {
+			a.state.ActiveConnection = &models.Connection{
+				ID:          msg.ConnID,
+				Config:      msg.Config,
+				Connected:   conn.Connected,
+				ConnectedAt: conn.ConnectedAt,
+				LastPing:    conn.LastPing,
+				Error:       conn.Error,
+			}
+		}
+
+		// Save to connection history (ignore errors)
+		if a.connectionHistory != nil {
+			result, err := a.connectionHistory.Add(msg.Config)
+			if err != nil {
+				log.Printf("Warning: Failed to save connection to history: %v", err)
+			} else {
+				if result != nil && result.PasswordSaveError != nil {
+					log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
+				}
+				// Reload history in dialog
+				history := a.connectionHistory.GetRecent(10)
+				a.connectionDialog.SetHistoryEntries(history)
+			}
+		}
+
+		// Trigger tree loading
+		a.showConnectionDialog = false
+		return a, func() tea.Msg {
+			return LoadTreeMsg{}
+		}
 
 	case LoadTreeMsg:
 		a.treeView.IsLoading = true
@@ -2919,50 +2988,25 @@ func (a *App) connectToDiscoveredInstance(instance models.DiscoveredInstance) (t
 	return a.performConnection(config)
 }
 
-// performConnection executes the actual connection
+// performConnection starts an async connection attempt
 func (a *App) performConnection(config models.ConnectionConfig) (tea.Model, tea.Cmd) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	connID, err := a.connectionManager.Connect(ctx, config)
-	if err != nil {
-		a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
-			config.Host, config.Port, err))
-		return a, nil
-	}
-
-	// Update active connection in state
-	conn, err := a.connectionManager.GetActive()
-	if err == nil && conn != nil {
-		a.state.ActiveConnection = &models.Connection{
-			ID:          connID,
-			Config:      config,
-			Connected:   conn.Connected,
-			ConnectedAt: conn.ConnectedAt,
-			LastPing:    conn.LastPing,
-			Error:       conn.Error,
-		}
-	}
-
-	// Save to connection history (ignore errors)
-	if a.connectionHistory != nil {
-		result, err := a.connectionHistory.Add(config)
-		if err != nil {
-			log.Printf("Warning: Failed to save connection to history: %v", err)
-		} else {
-			if result != nil && result.PasswordSaveError != nil {
-				log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
-			}
-			// Reload history in dialog
-			history := a.connectionHistory.GetRecent(10)
-			a.connectionDialog.SetHistoryEntries(history)
-		}
-	}
-
-	// Trigger tree loading
-	a.showConnectionDialog = false
 	return a, func() tea.Msg {
-		return LoadTreeMsg{}
+		return ConnectionStartMsg{Config: config}
+	}
+}
+
+// connectAsync performs the actual connection in a goroutine
+func (a *App) connectAsync(config models.ConnectionConfig) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		connID, err := a.connectionManager.Connect(ctx, config)
+		return ConnectionResultMsg{
+			Config: config,
+			ConnID: connID,
+			Err:    err,
+		}
 	}
 }
 
@@ -3025,6 +3069,13 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc":
+		// Cancel connection attempt if in progress
+		if a.isConnecting {
+			a.isConnecting = false
+			// Connection will complete in background but result will be ignored
+			// since isConnecting is false
+			return a, nil
+		}
 		a.showConnectionDialog = false
 		return a, nil
 
@@ -3088,52 +3139,7 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.ShowError("Invalid Configuration", fmt.Sprintf("Could not parse connection configuration\n\nError: %v", err))
 				return a, nil
 			}
-
-			// Connect using manual configuration
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			connID, err := a.connectionManager.Connect(ctx, config)
-			if err != nil {
-				// Show error overlay
-				a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
-					config.Host, config.Port, err))
-				return a, nil
-			}
-
-			// Update active connection in state
-			conn, err := a.connectionManager.GetActive()
-			if err == nil && conn != nil {
-				a.state.ActiveConnection = &models.Connection{
-					ID:          connID,
-					Config:      config,
-					Connected:   conn.Connected,
-					ConnectedAt: conn.ConnectedAt,
-					LastPing:    conn.LastPing,
-					Error:       conn.Error,
-				}
-			}
-
-			// Save to connection history (ignore errors)
-			if a.connectionHistory != nil {
-				result, err := a.connectionHistory.Add(config)
-				if err != nil {
-					log.Printf("Warning: Failed to save connection to history: %v", err)
-				} else {
-					if result != nil && result.PasswordSaveError != nil {
-						log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
-					}
-					// Reload history in dialog
-					history := a.connectionHistory.GetRecent(10)
-					a.connectionDialog.SetHistoryEntries(history)
-				}
-			}
-
-			// Trigger tree loading
-			a.showConnectionDialog = false
-			return a, func() tea.Msg {
-				return LoadTreeMsg{}
-			}
+			return a.performConnection(config)
 		} else {
 			var config models.ConnectionConfig
 
@@ -3172,63 +3178,17 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 
 				// Create connection config from discovered instance
-				// Note: We'll need to prompt for database/user/password in future
-				// For now, use common defaults
 				config = models.ConnectionConfig{
 					Host:     instance.Host,
 					Port:     instance.Port,
-					Database: "postgres",          // Default database
-					User:     os.Getenv("USER"),   // Current user
-					Password: "",                  // No password for now
+					Database: "postgres",
+					User:     os.Getenv("USER"),
+					Password: "",
 					SSLMode:  "prefer",
 				}
 			}
 
-			// Connect using the configuration
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			connID, err := a.connectionManager.Connect(ctx, config)
-			if err != nil {
-				// Show error overlay
-				a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
-					config.Host, config.Port, err))
-				return a, nil
-			}
-
-			// Update active connection in state
-			conn, err := a.connectionManager.GetActive()
-			if err == nil && conn != nil {
-				a.state.ActiveConnection = &models.Connection{
-					ID:          connID,
-					Config:      config,
-					Connected:   conn.Connected,
-					ConnectedAt: conn.ConnectedAt,
-					LastPing:    conn.LastPing,
-					Error:       conn.Error,
-				}
-			}
-
-			// Save to connection history (ignore errors)
-			if a.connectionHistory != nil {
-				result, err := a.connectionHistory.Add(config)
-				if err != nil {
-					log.Printf("Warning: Failed to save connection to history: %v", err)
-				} else {
-					if result != nil && result.PasswordSaveError != nil {
-						log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
-					}
-					// Reload history in dialog
-					history := a.connectionHistory.GetRecent(10)
-					a.connectionDialog.SetHistoryEntries(history)
-				}
-			}
-
-			// Trigger tree loading
-			a.showConnectionDialog = false
-			return a, func() tea.Msg {
-				return LoadTreeMsg{}
-			}
+			return a.performConnection(config)
 		}
 
 	default:
@@ -3467,6 +3427,11 @@ func (a *App) getTableColumns() []models.ColumnInfo {
 
 // renderConnectionDialog renders the connection dialog centered on screen
 func (a *App) renderConnectionDialog() string {
+	// If connecting, show loading overlay instead
+	if a.isConnecting {
+		return a.renderConnectingOverlay()
+	}
+
 	// Center the dialog
 	dialogWidth := 60
 	dialogHeight := 20
@@ -3493,17 +3458,83 @@ func (a *App) renderConnectionDialog() string {
 	return style.Render(dialog)
 }
 
+// renderConnectingOverlay renders the connecting loading state
+func (a *App) renderConnectingOverlay() string {
+	elapsed := time.Since(a.connectingStart)
+	elapsedStr := fmt.Sprintf("(%.1fs)", elapsed.Seconds())
+
+	loadingStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
+	elapsedStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+	hostStyle := lipgloss.NewStyle().Foreground(a.theme.Foreground)
+	hintStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+
+	hostInfo := fmt.Sprintf("%s@%s:%d/%s",
+		a.connectingConfig.User,
+		a.connectingConfig.Host,
+		a.connectingConfig.Port,
+		a.connectingConfig.Database,
+	)
+
+	// Build each line separately
+	line1 := a.executeSpinner.View() + " " + loadingStyle.Render("Connecting...") + " " + elapsedStyle.Render(elapsedStr)
+	line2 := hostStyle.Render(hostInfo)
+	line3 := hintStyle.Render("Press Esc to cancel")
+
+	// Calculate dialog width based on content
+	maxLen := len(hostInfo)
+	if maxLen < 40 {
+		maxLen = 40
+	}
+	dialogWidth := maxLen + 8 // padding
+
+	// Create content with proper centering
+	contentStyle := lipgloss.NewStyle().Width(dialogWidth - 6).Align(lipgloss.Center)
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		contentStyle.Render(line1),
+		"",
+		contentStyle.Render(line2),
+		"",
+		contentStyle.Render(line3),
+	)
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(a.theme.BorderFocused).
+		Padding(1, 2)
+
+	dialog := dialogStyle.Render(content)
+
+	// Center on screen
+	dialogHeight := 10
+	verticalPadding := (a.state.Height - dialogHeight) / 2
+	horizontalPadding := (a.state.Width - dialogWidth - 4) / 2
+
+	if verticalPadding < 0 {
+		verticalPadding = 0
+	}
+	if horizontalPadding < 0 {
+		horizontalPadding = 0
+	}
+
+	style := lipgloss.NewStyle().
+		Padding(verticalPadding, 0, 0, horizontalPadding)
+
+	return style.Render(dialog)
+}
+
 func (a *App) renderPasswordDialog() string {
-	// Center the dialog
-	dialogWidth := 50
-	dialogHeight := 12
+	// Dialog dimensions (must match password_dialog.go)
+	dialogWidth := 56 + 2 // content width + border
+	dialogHeight := 14
 
 	a.passwordDialog.Width = dialogWidth
 	a.passwordDialog.Height = dialogHeight
 
 	dialog := a.passwordDialog.View()
 
-	// Center it
+	// Center on screen
 	verticalPadding := (a.state.Height - dialogHeight) / 2
 	horizontalPadding := (a.state.Width - dialogWidth) / 2
 
