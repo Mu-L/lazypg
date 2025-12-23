@@ -3684,6 +3684,309 @@ func (a *App) loadTree() tea.Msg {
 	return TreeLoadedMsg{Root: root}
 }
 
+// loadNodeChildren loads children for a specific node (lazy loading)
+func (a *App) loadNodeChildren(nodeID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+		}
+
+		// Parse node ID to determine what to load
+		node := a.treeView.Root.FindByID(nodeID)
+		if node == nil {
+			return NodeChildrenLoadedMsg{NodeID: nodeID, Err: fmt.Errorf("node not found: %s", nodeID)}
+		}
+
+		var children []*models.TreeNode
+		currentDB := conn.Config.Database
+
+		switch node.Type {
+		case models.TreeNodeTypeTableGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			tables, err := metadata.ListTables(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, table := range tables {
+				tableNode := models.NewTreeNode(
+					fmt.Sprintf("table:%s.%s.%s", currentDB, schema, table.Name),
+					models.TreeNodeTypeTable,
+					table.Name,
+				)
+				tableNode.Selectable = true
+				tableNode.Loaded = false // Has indexes/triggers to lazy load
+				children = append(children, tableNode)
+			}
+
+		case models.TreeNodeTypeViewGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			views, err := metadata.ListViews(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, view := range views {
+				viewNode := models.NewTreeNode(
+					fmt.Sprintf("view:%s.%s.%s", currentDB, schema, view.Name),
+					models.TreeNodeTypeView,
+					view.Name,
+				)
+				viewNode.Selectable = true
+				viewNode.Loaded = true
+				children = append(children, viewNode)
+			}
+
+		case models.TreeNodeTypeMaterializedViewGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			matViews, err := metadata.ListMaterializedViews(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, mv := range matViews {
+				mvNode := models.NewTreeNode(
+					fmt.Sprintf("matview:%s.%s.%s", currentDB, schema, mv.Name),
+					models.TreeNodeTypeMaterializedView,
+					mv.Name,
+				)
+				mvNode.Selectable = true
+				mvNode.Loaded = true
+				children = append(children, mvNode)
+			}
+
+		case models.TreeNodeTypeFunctionGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			funcs, err := metadata.ListFunctions(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, f := range funcs {
+				label := f.Name
+				if f.Arguments != "" {
+					label = fmt.Sprintf("%s(%s)", f.Name, f.Arguments)
+				}
+				funcNode := models.NewTreeNode(
+					fmt.Sprintf("function:%s.%s.%s(%s)", currentDB, schema, f.Name, f.Arguments),
+					models.TreeNodeTypeFunction,
+					label,
+				)
+				funcNode.Selectable = true
+				funcNode.Metadata = f
+				funcNode.Loaded = true
+				children = append(children, funcNode)
+			}
+
+		case models.TreeNodeTypeProcedureGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			procs, err := metadata.ListProcedures(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, p := range procs {
+				label := p.Name
+				if p.Arguments != "" {
+					label = fmt.Sprintf("%s(%s)", p.Name, p.Arguments)
+				}
+				procNode := models.NewTreeNode(
+					fmt.Sprintf("procedure:%s.%s.%s(%s)", currentDB, schema, p.Name, p.Arguments),
+					models.TreeNodeTypeProcedure,
+					label,
+				)
+				procNode.Selectable = true
+				procNode.Metadata = p
+				procNode.Loaded = true
+				children = append(children, procNode)
+			}
+
+		case models.TreeNodeTypeTriggerFunctionGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			trigFuncs, err := metadata.ListTriggerFunctions(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, tf := range trigFuncs {
+				tfNode := models.NewTreeNode(
+					fmt.Sprintf("triggerfunc:%s.%s.%s", currentDB, schema, tf.Name),
+					models.TreeNodeTypeTriggerFunction,
+					tf.Name,
+				)
+				tfNode.Selectable = true
+				tfNode.Metadata = tf
+				tfNode.Loaded = true
+				children = append(children, tfNode)
+			}
+
+		case models.TreeNodeTypeSequenceGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			seqs, err := metadata.ListSequences(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, seq := range seqs {
+				seqNode := models.NewTreeNode(
+					fmt.Sprintf("sequence:%s.%s.%s", currentDB, schema, seq.Name),
+					models.TreeNodeTypeSequence,
+					seq.Name,
+				)
+				seqNode.Selectable = true
+				seqNode.Metadata = seq
+				seqNode.Loaded = true
+				children = append(children, seqNode)
+			}
+
+		case models.TreeNodeTypeCompositeTypeGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			compTypes, err := metadata.ListCompositeTypes(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, ct := range compTypes {
+				ctNode := models.NewTreeNode(
+					fmt.Sprintf("compositetype:%s.%s.%s", currentDB, schema, ct.Name),
+					models.TreeNodeTypeCompositeType,
+					ct.Name,
+				)
+				ctNode.Selectable = true
+				ctNode.Metadata = ct
+				ctNode.Loaded = true
+				children = append(children, ctNode)
+			}
+
+		case models.TreeNodeTypeEnumTypeGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			enumTypes, err := metadata.ListEnumTypes(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, et := range enumTypes {
+				etNode := models.NewTreeNode(
+					fmt.Sprintf("enumtype:%s.%s.%s", currentDB, schema, et.Name),
+					models.TreeNodeTypeEnumType,
+					et.Name,
+				)
+				etNode.Selectable = true
+				etNode.Metadata = et
+				etNode.Loaded = true
+				children = append(children, etNode)
+			}
+
+		case models.TreeNodeTypeDomainTypeGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			domainTypes, err := metadata.ListDomainTypes(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, dt := range domainTypes {
+				dtNode := models.NewTreeNode(
+					fmt.Sprintf("domaintype:%s.%s.%s", currentDB, schema, dt.Name),
+					models.TreeNodeTypeDomainType,
+					dt.Name,
+				)
+				dtNode.Selectable = true
+				dtNode.Metadata = dt
+				dtNode.Loaded = true
+				children = append(children, dtNode)
+			}
+
+		case models.TreeNodeTypeRangeTypeGroup:
+			schema := extractSchemaFromNodeID(nodeID)
+			rangeTypes, err := metadata.ListRangeTypes(ctx, conn.Pool, schema)
+			if err != nil {
+				return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			}
+			for _, rt := range rangeTypes {
+				rtNode := models.NewTreeNode(
+					fmt.Sprintf("rangetype:%s.%s.%s", currentDB, schema, rt.Name),
+					models.TreeNodeTypeRangeType,
+					rt.Name,
+				)
+				rtNode.Selectable = true
+				rtNode.Metadata = rt
+				rtNode.Loaded = true
+				children = append(children, rtNode)
+			}
+
+		case models.TreeNodeTypeTable:
+			// Load indexes and triggers for a table
+			schema, table := extractSchemaAndTableFromNodeID(nodeID)
+			indexes, _ := metadata.ListTableIndexes(ctx, conn.Pool, schema, table)
+			triggers, _ := metadata.ListTableTriggers(ctx, conn.Pool, schema, table)
+
+			if len(indexes) > 0 {
+				indexGroup := models.NewTreeNode(
+					fmt.Sprintf("indexes:%s.%s.%s", currentDB, schema, table),
+					models.TreeNodeTypeIndexGroup,
+					fmt.Sprintf("Indexes (%d)", len(indexes)),
+				)
+				indexGroup.Selectable = false
+				for _, idx := range indexes {
+					idxNode := models.NewTreeNode(
+						fmt.Sprintf("index:%s.%s.%s.%s", currentDB, schema, table, idx.Name),
+						models.TreeNodeTypeIndex,
+						idx.Name,
+					)
+					idxNode.Selectable = true
+					idxNode.Metadata = idx
+					idxNode.Loaded = true
+					indexGroup.AddChild(idxNode)
+				}
+				indexGroup.Loaded = true
+				children = append(children, indexGroup)
+			}
+
+			if len(triggers) > 0 {
+				triggerGroup := models.NewTreeNode(
+					fmt.Sprintf("triggers:%s.%s.%s", currentDB, schema, table),
+					models.TreeNodeTypeTriggerGroup,
+					fmt.Sprintf("Triggers (%d)", len(triggers)),
+				)
+				triggerGroup.Selectable = false
+				for _, trg := range triggers {
+					trgNode := models.NewTreeNode(
+						fmt.Sprintf("trigger:%s.%s.%s.%s", currentDB, schema, table, trg.Name),
+						models.TreeNodeTypeTrigger,
+						trg.Name,
+					)
+					trgNode.Selectable = true
+					trgNode.Metadata = trg
+					trgNode.Loaded = true
+					triggerGroup.AddChild(trgNode)
+				}
+				triggerGroup.Loaded = true
+				children = append(children, triggerGroup)
+			}
+		}
+
+		return NodeChildrenLoadedMsg{NodeID: nodeID, Children: children}
+	}
+}
+
+// extractSchemaFromNodeID extracts schema name from node ID like "tables:db.schema"
+func extractSchemaFromNodeID(nodeID string) string {
+	parts := strings.Split(nodeID, ":")
+	if len(parts) < 2 {
+		return ""
+	}
+	dbSchema := strings.Split(parts[1], ".")
+	if len(dbSchema) < 2 {
+		return ""
+	}
+	return dbSchema[1]
+}
+
+// extractSchemaAndTableFromNodeID extracts schema and table from node ID like "table:db.schema.table"
+func extractSchemaAndTableFromNodeID(nodeID string) (string, string) {
+	parts := strings.Split(nodeID, ":")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	dbSchemaTable := strings.Split(parts[1], ".")
+	if len(dbSchemaTable) < 3 {
+		return "", ""
+	}
+	return dbSchemaTable[1], dbSchemaTable[2]
+}
 
 // loadTableData loads table data with pagination
 func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
