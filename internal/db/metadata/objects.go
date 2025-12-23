@@ -796,12 +796,13 @@ func GetSchemaObjectCounts(ctx context.Context, pool *connection.Pool) ([]Schema
 		type_counts AS (
 			SELECT
 				n.nspname AS schema_name,
-				SUM(CASE WHEN t.typtype = 'c' THEN 1 ELSE 0 END) AS composite_types,
+				SUM(CASE WHEN t.typtype = 'c' AND (tc.relkind IS NULL OR tc.relkind = 'c') THEN 1 ELSE 0 END) AS composite_types,
 				SUM(CASE WHEN t.typtype = 'e' THEN 1 ELSE 0 END) AS enum_types,
 				SUM(CASE WHEN t.typtype = 'd' THEN 1 ELSE 0 END) AS domain_types,
 				SUM(CASE WHEN t.typtype = 'r' THEN 1 ELSE 0 END) AS range_types
 			FROM pg_namespace n
 			LEFT JOIN pg_type t ON t.typnamespace = n.oid
+			LEFT JOIN pg_class tc ON t.typrelid = tc.oid
 			WHERE n.nspname NOT LIKE 'pg_%'
 			  AND n.nspname != 'information_schema'
 			GROUP BY n.nspname
