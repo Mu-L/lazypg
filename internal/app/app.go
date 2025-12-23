@@ -1481,6 +1481,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case LoadNodeChildrenMsg:
+		a.treeView.LoadingNodeID = msg.NodeID
+		return a, tea.Batch(a.loadNodeChildren(msg.NodeID), a.executeSpinner.Tick)
+
+	case NodeChildrenLoadedMsg:
+		a.treeView.LoadingNodeID = ""
+		if msg.Err != nil {
+			a.ShowError("Load Error", fmt.Sprintf("Failed to load children:\n\n%v", msg.Err))
+			return a, nil
+		}
+		// Find the node and add children
+		node := a.treeView.Root.FindByID(msg.NodeID)
+		if node != nil {
+			for _, child := range msg.Children {
+				child.Parent = node
+				node.AddChild(child)
+			}
+			node.Loaded = true
+			node.Expanded = true
+		}
+		return a, nil
+
+	case components.TreeNodeExpandedMsg:
+		// Check if this node needs lazy loading
+		if msg.Expanded && msg.Node != nil && !msg.Node.Loaded && len(msg.Node.Children) == 0 {
+			// Trigger lazy load
+			return a, func() tea.Msg {
+				return LoadNodeChildrenMsg{NodeID: msg.Node.ID}
+			}
+		}
+		return a, nil
+
 	case components.TreeNodeSelectedMsg:
 		// Handle selection based on node type
 		if msg.Node == nil {
