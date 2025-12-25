@@ -110,6 +110,13 @@ type SchemaObjectCounts struct {
 	RangeTypes        int
 }
 
+// SchemaObject represents a single database object for search indexing
+type SchemaObject struct {
+	SchemaName string
+	ObjectType string // "table", "view", "matview", "function", "procedure", "trigger_function", "sequence", "composite_type", "enum_type", "domain_type", "range_type"
+	ObjectName string
+}
+
 // TotalObjects returns the total count of all objects in the schema
 func (s *SchemaObjectCounts) TotalObjects() int {
 	return s.Tables + s.Views + s.MaterializedViews + s.Sequences +
@@ -850,6 +857,140 @@ func GetSchemaObjectCounts(ctx context.Context, pool *connection.Pool) ([]Schema
 	}
 
 	return counts, nil
+}
+
+// GetAllSchemaObjects returns all object names grouped by schema and type
+func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaObject, error) {
+	query := `
+		-- Tables
+		SELECT n.nspname AS schema_name, 'table' AS object_type, c.relname AS object_name
+		FROM pg_class c
+		JOIN pg_namespace n ON c.relnamespace = n.oid
+		WHERE c.relkind = 'r'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Views
+		SELECT n.nspname, 'view', c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON c.relnamespace = n.oid
+		WHERE c.relkind = 'v'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Materialized Views
+		SELECT n.nspname, 'matview', c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON c.relnamespace = n.oid
+		WHERE c.relkind = 'm'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Sequences
+		SELECT n.nspname, 'sequence', c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON c.relnamespace = n.oid
+		WHERE c.relkind = 'S'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Functions (excluding trigger functions)
+		SELECT n.nspname, 'function', p.proname
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		WHERE p.prokind = 'f'
+		  AND p.prorettype != 'trigger'::regtype
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Procedures
+		SELECT n.nspname, 'procedure', p.proname
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		WHERE p.prokind = 'p'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Trigger Functions
+		SELECT n.nspname, 'trigger_function', p.proname
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		WHERE p.prorettype = 'trigger'::regtype
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Composite Types
+		SELECT n.nspname, 'composite_type', t.typname
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		LEFT JOIN pg_class c ON t.typrelid = c.oid
+		WHERE t.typtype = 'c'
+		  AND (c.relkind IS NULL OR c.relkind = 'c')
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Enum Types
+		SELECT n.nspname, 'enum_type', t.typname
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE t.typtype = 'e'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Domain Types
+		SELECT n.nspname, 'domain_type', t.typname
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE t.typtype = 'd'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		UNION ALL
+
+		-- Range Types
+		SELECT n.nspname, 'range_type', t.typname
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE t.typtype = 'r'
+		  AND n.nspname NOT LIKE 'pg_%'
+		  AND n.nspname != 'information_schema'
+
+		ORDER BY schema_name, object_type, object_name;
+	`
+
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema objects: %w", err)
+	}
+
+	objects := make([]SchemaObject, 0, len(rows))
+	for _, row := range rows {
+		objects = append(objects, SchemaObject{
+			SchemaName: toString(row["schema_name"]),
+			ObjectType: toString(row["object_type"]),
+			ObjectName: toString(row["object_name"]),
+		})
+	}
+
+	return objects, nil
 }
 
 // Helper functions for type conversion
