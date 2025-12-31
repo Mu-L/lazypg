@@ -19,6 +19,11 @@ import (
 // CodeEditorCloseMsg is sent when the code editor should be closed
 type CodeEditorCloseMsg struct{}
 
+// CopySuccessMsg is sent when content is copied to clipboard
+type CopySuccessMsg struct {
+	BytesCopied int
+}
+
 // SaveObjectMsg is sent when user wants to save changes
 type SaveObjectMsg struct {
 	ObjectType string // "function", "procedure", "view", etc.
@@ -47,12 +52,13 @@ type CodeEditor struct {
 	Language   string // "plpgsql", "sql"
 
 	// State
-	Width    int
-	Height   int
-	ReadOnly bool   // true = view mode, false = edit mode
-	Modified bool   // true if content changed from original
-	Original string // Original content for comparison
-	Focused  bool   // true if this editor has focus
+	Width         int
+	Height        int
+	ReadOnly      bool   // true = view mode, false = edit mode
+	Modified      bool   // true if content changed from original
+	Original      string // Original content for comparison
+	Focused       bool   // true if this editor has focus
+	statusMessage string // Temporary status message (e.g., "✓ Copied")
 
 	// Theme
 	Theme theme.Theme
@@ -479,7 +485,7 @@ func (ce *CodeEditor) renderStatusBar(width int) string {
 	var helpParts []string
 
 	if ce.ReadOnly {
-		helpParts = []string{"e:edit", "y:copy", "q:close"}
+		helpParts = []string{"e:edit", "y:copy", "esc:close"}
 
 		// Show scroll hint if content is scrollable
 		if len(ce.lines) > ce.Height-5 {
@@ -511,15 +517,31 @@ func (ce *CodeEditor) renderStatusBar(width int) string {
 		posInfo = fmt.Sprintf("Ln %d, Col %d", lineNum, colNum)
 	}
 
+	// Add status message if present
+	statusText := ""
+	if ce.statusMessage != "" {
+		// Use green for success (✓), yellow for warnings (⚠)
+		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")) // Green
+		if strings.HasPrefix(ce.statusMessage, "⚠") {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f9e2af")) // Yellow
+		}
+		statusText = "  " + statusStyle.Render(ce.statusMessage)
+	}
+
 	// Calculate spacing
 	helpWidth := runewidth.StringWidth(helpText)
+	statusWidth := runewidth.StringWidth(ce.statusMessage)
+	if statusWidth > 0 {
+		statusWidth += 2 // for "  " prefix
+	}
 	posWidth := runewidth.StringWidth(posInfo)
-	padding := width - helpWidth - posWidth
+	padding := width - helpWidth - statusWidth - posWidth
 	if padding < 1 {
 		padding = 1
 	}
 
 	return ce.cachedStyles.statusBar.Render(helpText) +
+		statusText +
 		strings.Repeat(" ", padding) +
 		ce.cachedStyles.statusBar.Render(posInfo)
 }
@@ -559,6 +581,11 @@ func (ce *CodeEditor) Update(msg tea.KeyMsg) (*CodeEditor, tea.Cmd) {
 
 // handleReadOnlyKeys handles key events in read-only mode
 func (ce *CodeEditor) handleReadOnlyKeys(msg tea.KeyMsg) (*CodeEditor, tea.Cmd) {
+	// Clear status message on any key press (except when copying)
+	if msg.String() != "y" {
+		ce.statusMessage = ""
+	}
+
 	switch msg.String() {
 	// Scrolling
 	case "j", "down":
@@ -576,14 +603,19 @@ func (ce *CodeEditor) handleReadOnlyKeys(msg tea.KeyMsg) (*CodeEditor, tea.Cmd) 
 
 	// Copy
 	case "y":
-		_ = ce.CopyContent()
+		content := ce.GetContent()
+		if err := clipboard.WriteAll(content); err == nil {
+			ce.statusMessage = fmt.Sprintf("✓ Copied (%d bytes)", len(content))
+		} else {
+			ce.statusMessage = fmt.Sprintf("⚠ Copy failed: %v", err)
+		}
 
 	// Enter edit mode
 	case "e":
 		ce.EnterEditMode()
 
-	// Close
-	case "q", "esc":
+	// Close (only esc, q is reserved for quitting app)
+	case "esc":
 		return ce, func() tea.Msg {
 			return CodeEditorCloseMsg{}
 		}

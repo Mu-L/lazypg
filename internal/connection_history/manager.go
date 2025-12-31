@@ -119,7 +119,7 @@ func (m *Manager) Add(config models.ConnectionConfig) (*AddResult, error) {
 			entry.Port == config.Port &&
 			entry.Database == config.Database &&
 			entry.User == config.User {
-			// Update existing entry - skip password save since it should already be in keyring
+			// Update existing entry
 			m.history[i].LastUsed = time.Now()
 			m.history[i].UsageCount++
 			m.history[i].SSLMode = config.SSLMode
@@ -127,6 +127,9 @@ func (m *Manager) Add(config models.ConnectionConfig) (*AddResult, error) {
 			if config.Name != "" {
 				m.history[i].Name = config.Name
 			}
+			// Note: Don't save password here for existing connections
+			// Password from keyring is already saved; manually entered password
+			// will be saved separately after successful connection
 			return result, m.Save()
 		}
 	}

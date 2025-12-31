@@ -115,6 +115,7 @@ type SchemaObject struct {
 	SchemaName string
 	ObjectType string // "table", "view", "matview", "function", "procedure", "trigger_function", "sequence", "composite_type", "enum_type", "domain_type", "range_type"
 	ObjectName string
+	Arguments  string // Function/procedure arguments (empty for non-function types)
 }
 
 // TotalObjects returns the total count of all objects in the schema
@@ -863,7 +864,7 @@ func GetSchemaObjectCounts(ctx context.Context, pool *connection.Pool) ([]Schema
 func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaObject, error) {
 	query := `
 		-- Tables
-		SELECT n.nspname AS schema_name, 'table' AS object_type, c.relname AS object_name
+		SELECT n.nspname AS schema_name, 'table' AS object_type, c.relname AS object_name, '' AS arguments
 		FROM pg_class c
 		JOIN pg_namespace n ON c.relnamespace = n.oid
 		WHERE c.relkind = 'r'
@@ -873,7 +874,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Views
-		SELECT n.nspname, 'view', c.relname
+		SELECT n.nspname, 'view', c.relname, ''
 		FROM pg_class c
 		JOIN pg_namespace n ON c.relnamespace = n.oid
 		WHERE c.relkind = 'v'
@@ -883,7 +884,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Materialized Views
-		SELECT n.nspname, 'matview', c.relname
+		SELECT n.nspname, 'matview', c.relname, ''
 		FROM pg_class c
 		JOIN pg_namespace n ON c.relnamespace = n.oid
 		WHERE c.relkind = 'm'
@@ -893,7 +894,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Sequences
-		SELECT n.nspname, 'sequence', c.relname
+		SELECT n.nspname, 'sequence', c.relname, ''
 		FROM pg_class c
 		JOIN pg_namespace n ON c.relnamespace = n.oid
 		WHERE c.relkind = 'S'
@@ -903,7 +904,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Functions (excluding trigger functions)
-		SELECT n.nspname, 'function', p.proname
+		SELECT n.nspname, 'function', p.proname, pg_get_function_identity_arguments(p.oid)
 		FROM pg_proc p
 		JOIN pg_namespace n ON p.pronamespace = n.oid
 		WHERE p.prokind = 'f'
@@ -914,7 +915,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Procedures
-		SELECT n.nspname, 'procedure', p.proname
+		SELECT n.nspname, 'procedure', p.proname, pg_get_function_identity_arguments(p.oid)
 		FROM pg_proc p
 		JOIN pg_namespace n ON p.pronamespace = n.oid
 		WHERE p.prokind = 'p'
@@ -923,8 +924,8 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 
 		UNION ALL
 
-		-- Trigger Functions
-		SELECT n.nspname, 'trigger_function', p.proname
+		-- Trigger Functions (no arguments needed, they always have no params)
+		SELECT n.nspname, 'trigger_function', p.proname, ''
 		FROM pg_proc p
 		JOIN pg_namespace n ON p.pronamespace = n.oid
 		WHERE p.prorettype = 'trigger'::regtype
@@ -934,7 +935,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Composite Types
-		SELECT n.nspname, 'composite_type', t.typname
+		SELECT n.nspname, 'composite_type', t.typname, ''
 		FROM pg_type t
 		JOIN pg_namespace n ON t.typnamespace = n.oid
 		LEFT JOIN pg_class c ON t.typrelid = c.oid
@@ -946,7 +947,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Enum Types
-		SELECT n.nspname, 'enum_type', t.typname
+		SELECT n.nspname, 'enum_type', t.typname, ''
 		FROM pg_type t
 		JOIN pg_namespace n ON t.typnamespace = n.oid
 		WHERE t.typtype = 'e'
@@ -956,7 +957,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Domain Types
-		SELECT n.nspname, 'domain_type', t.typname
+		SELECT n.nspname, 'domain_type', t.typname, ''
 		FROM pg_type t
 		JOIN pg_namespace n ON t.typnamespace = n.oid
 		WHERE t.typtype = 'd'
@@ -966,7 +967,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 		UNION ALL
 
 		-- Range Types
-		SELECT n.nspname, 'range_type', t.typname
+		SELECT n.nspname, 'range_type', t.typname, ''
 		FROM pg_type t
 		JOIN pg_namespace n ON t.typnamespace = n.oid
 		WHERE t.typtype = 'r'
@@ -987,6 +988,7 @@ func GetAllSchemaObjects(ctx context.Context, pool *connection.Pool) ([]SchemaOb
 			SchemaName: toString(row["schema_name"]),
 			ObjectType: toString(row["object_type"]),
 			ObjectName: toString(row["object_name"]),
+			Arguments:  toString(row["arguments"]),
 		})
 	}
 

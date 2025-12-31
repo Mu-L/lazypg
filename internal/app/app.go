@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +33,15 @@ import (
 	"github.com/rebelice/lazypg/internal/ui/help"
 	"github.com/rebelice/lazypg/internal/ui/theme"
 )
+
+// pendingPassword holds password info to save after successful connection
+type pendingPassword struct {
+	Host     string
+	Port     int
+	Database string
+	User     string
+	Password string
+}
 
 // App is the main application model
 type App struct {
@@ -90,8 +100,9 @@ type App struct {
 	currentTab        int // 0=Data, 1=Columns, 2=Constraints, 3=Indexes
 
 	// Code editor for viewing/editing database object definitions
-	codeEditor     *components.CodeEditor
-	showCodeEditor bool
+	codeEditor              *components.CodeEditor
+	showCodeEditor          bool
+	isLoadingObjectDetails  bool // Loading indicator for function/sequence/etc details
 
 	// Favorites
 	showFavorites    bool
@@ -105,6 +116,7 @@ type App struct {
 	showPasswordDialog    bool
 	passwordDialog        *components.PasswordDialog
 	pendingConnectionInfo *models.ConnectionHistoryEntry
+	pendingPasswordSave   *pendingPassword // Password to save after successful connection
 
 	// Search input
 	showSearch  bool
@@ -422,7 +434,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.treeView.IsLoading ||
 			a.treeView.LoadingNodeID != "" ||
 			a.tableView.IsPaginating ||
-			a.isConnecting
+			a.isConnecting ||
+			a.isLoadingObjectDetails
 
 		// Also check active tab's table view
 		if activeTab := a.resultTabs.GetActiveTab(); activeTab != nil {
@@ -647,11 +660,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			config := a.pendingConnectionInfo.ToConnectionConfig()
 			config.Password = msg.Password
 
-			// Try to save the password for future use
-			if a.connectionHistory != nil {
-				if err := a.connectionHistory.SavePassword(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
-					log.Printf("Warning: Failed to save password: %v", err)
-				}
+			// Store password info to save after successful connection
+			// This avoids: 1) saving wrong passwords, 2) double keychain prompts
+			a.pendingPasswordSave = &pendingPassword{
+				Host:     config.Host,
+				Port:     config.Port,
+				Database: config.Database,
+				User:     config.User,
+				Password: msg.Password,
 			}
 
 			a.pendingConnectionInfo = nil
@@ -915,11 +931,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Handle code editor input if visible and DataPanel is focused
-		if a.showCodeEditor && a.codeEditor != nil && a.state.FocusArea == models.FocusDataPanel {
-			// Tab is handled in the unified Tab case below, skip here
-			if msg.String() != "tab" && msg.String() != "shift+tab" && msg.String() != "backtab" {
-				_, cmd := a.codeEditor.Update(msg)
-				return a, cmd
+		if a.state.FocusArea == models.FocusDataPanel {
+			// Keys that the code editor handles in read-only mode
+			codeEditorReadOnlyKeys := map[string]bool{
+				"j": true, "k": true, "up": true, "down": true, // Scrolling
+				"g": true, "G": true, // Scroll to top/bottom
+				"ctrl+d": true, "ctrl+u": true, // Page scroll
+				"y": true,   // Copy
+				"e": true,   // Enter edit mode
+				"esc": true, // Close (q is reserved for quitting app)
+			}
+			key := msg.String()
+
+			// Check for tab-based code editor first
+			if activeTab := a.resultTabs.GetActiveTab(); activeTab != nil && activeTab.Type == components.TabTypeCodeEditor && activeTab.CodeEditor != nil {
+				ce := activeTab.CodeEditor
+				// In edit mode, route most keys to editor; in read-only mode, only route specific keys
+				if !ce.ReadOnly || codeEditorReadOnlyKeys[key] {
+					_, cmd := ce.Update(msg)
+					return a, cmd
+				}
+			}
+			// Legacy: handle global code editor
+			if a.showCodeEditor && a.codeEditor != nil {
+				if !a.codeEditor.ReadOnly || codeEditorReadOnlyKeys[key] {
+					_, cmd := a.codeEditor.Update(msg)
+					return a, cmd
+				}
 			}
 		}
 
@@ -1482,9 +1520,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.isConnecting = false
 		if msg.Err != nil {
+			// Connection failed - clear pending password (don't save wrong password)
+			a.pendingPasswordSave = nil
 			a.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
 				msg.Config.Host, msg.Config.Port, msg.Err))
 			return a, nil
+		}
+
+		// Connection succeeded - save manually entered password to keyring
+		if a.pendingPasswordSave != nil && a.connectionHistory != nil {
+			p := a.pendingPasswordSave
+			if err := a.connectionHistory.SavePassword(p.Host, p.Port, p.Database, p.User, p.Password); err != nil {
+				log.Printf("Warning: Failed to save password: %v", err)
+			}
+			a.pendingPasswordSave = nil
 		}
 
 		// Update active connection in state
@@ -1655,61 +1704,71 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Display function/procedure source code
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadFunctionSource(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadFunctionSource(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeTriggerFunction:
 			// Display trigger function source code
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadTriggerFunctionSource(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadTriggerFunctionSource(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeSequence:
 			// Display sequence properties
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadSequenceDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadSequenceDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeIndex:
 			// Display index DDL definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadIndexDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadIndexDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeTrigger:
 			// Display trigger DDL definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadTriggerDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadTriggerDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeExtension:
 			// Display extension info
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadExtensionDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadExtensionDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeCompositeType:
 			// Display composite type definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadCompositeTypeDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadCompositeTypeDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeEnumType:
 			// Display enum type definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadEnumTypeDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadEnumTypeDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeDomainType:
 			// Display domain type definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadDomainTypeDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadDomainTypeDetails(msg.Node), a.executeSpinner.Tick)
 
 		case models.TreeNodeTypeRangeType:
 			// Display range type definition
 			a.state.TreeSelected = msg.Node
 			a.currentTable = "" // Clear current table
-			return a, a.loadRangeTypeDetails(msg.Node)
+			a.isLoadingObjectDetails = true
+			return a, tea.Batch(a.loadRangeTypeDetails(msg.Node), a.executeSpinner.Tick)
 
 		default:
 			return a, nil
@@ -1719,6 +1778,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.loadTableData(msg)
 
 	case ObjectDetailsLoadedMsg:
+		a.isLoadingObjectDetails = false // Clear loading state
 		if msg.Err != nil {
 			a.ShowError("Error", fmt.Sprintf("Failed to load %s details:\n\n%v", msg.ObjectType, msg.Err))
 			return a, nil
@@ -2245,6 +2305,21 @@ func (a *App) renderRightPanel(width, height int) string {
 
 // renderDataPanel renders the data panel (table view or structure view)
 func (a *App) renderDataPanel(width, height int) string {
+	// Show loading spinner when loading object details (function, sequence, etc.)
+	if a.isLoadingObjectDetails {
+		spinnerView := a.executeSpinner.View()
+		statusText := lipgloss.NewStyle().
+			Foreground(a.theme.Foreground).
+			Render("Loading...")
+
+		content := lipgloss.JoinVertical(lipgloss.Center,
+			"",
+			spinnerView+" "+statusText,
+		)
+
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+	}
+
 	// If we have result tabs, show the active tab's content
 	if a.resultTabs.HasTabs() {
 		activeTab := a.resultTabs.GetActiveTab()
@@ -3593,13 +3668,17 @@ func (a *App) loadTree() tea.Msg {
 	}
 
 	// Organize objects by schema -> type -> names
+	type funcInfo struct {
+		name string
+		args string
+	}
 	type schemaData struct {
 		tables           []string
 		views            []string
 		matViews         []string
 		sequences        []string
-		functions        []string
-		procedures       []string
+		functions        []funcInfo
+		procedures       []funcInfo
 		triggerFunctions []string
 		compositeTypes   []string
 		enumTypes        []string
@@ -3624,9 +3703,9 @@ func (a *App) loadTree() tea.Msg {
 		case "sequence":
 			sd.sequences = append(sd.sequences, obj.ObjectName)
 		case "function":
-			sd.functions = append(sd.functions, obj.ObjectName)
+			sd.functions = append(sd.functions, funcInfo{name: obj.ObjectName, args: obj.Arguments})
 		case "procedure":
-			sd.procedures = append(sd.procedures, obj.ObjectName)
+			sd.procedures = append(sd.procedures, funcInfo{name: obj.ObjectName, args: obj.Arguments})
 		case "trigger_function":
 			sd.triggerFunctions = append(sd.triggerFunctions, obj.ObjectName)
 		case "composite_type":
@@ -3664,7 +3743,15 @@ func (a *App) loadTree() tea.Msg {
 	}
 
 	// Build tree with pre-populated object nodes
-	for schemaName, sd := range schemaMap {
+	// Sort schema names for consistent ordering
+	schemaNames := make([]string, 0, len(schemaMap))
+	for name := range schemaMap {
+		schemaNames = append(schemaNames, name)
+	}
+	sort.Strings(schemaNames)
+
+	for _, schemaName := range schemaNames {
+		sd := schemaMap[schemaName]
 		schemaNode := models.NewTreeNode(
 			fmt.Sprintf("schema:%s.%s", currentDB, schemaName),
 			models.TreeNodeTypeSchema,
@@ -3746,11 +3833,13 @@ func (a *App) loadTree() tea.Msg {
 				fmt.Sprintf("Functions (%d)", len(sd.functions)),
 			)
 			funcsGroup.Selectable = false
-			for _, funcName := range sd.functions {
+			for _, f := range sd.functions {
+				// Label includes arguments for unique identification (e.g., "my_func(integer, text)")
+				funcLabel := fmt.Sprintf("%s(%s)", f.name, f.args)
 				funcNode := models.NewTreeNode(
-					fmt.Sprintf("function:%s.%s.%s", currentDB, schemaName, funcName),
+					fmt.Sprintf("function:%s.%s.%s", currentDB, schemaName, f.name),
 					models.TreeNodeTypeFunction,
-					funcName,
+					funcLabel,
 				)
 				funcNode.Selectable = true
 				funcNode.Loaded = true // Functions don't have children
@@ -3768,11 +3857,13 @@ func (a *App) loadTree() tea.Msg {
 				fmt.Sprintf("Procedures (%d)", len(sd.procedures)),
 			)
 			procsGroup.Selectable = false
-			for _, procName := range sd.procedures {
+			for _, p := range sd.procedures {
+				// Label includes arguments for unique identification (e.g., "my_proc(integer, text)")
+				procLabel := fmt.Sprintf("%s(%s)", p.name, p.args)
 				procNode := models.NewTreeNode(
-					fmt.Sprintf("procedure:%s.%s.%s", currentDB, schemaName, procName),
+					fmt.Sprintf("procedure:%s.%s.%s", currentDB, schemaName, p.name),
 					models.TreeNodeTypeProcedure,
-					procName,
+					procLabel,
 				)
 				procNode.Selectable = true
 				procNode.Loaded = true // Procedures don't have children
