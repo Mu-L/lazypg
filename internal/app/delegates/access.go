@@ -105,6 +105,12 @@ type ConnectionAccess interface {
 
 	// SavePassword saves password after successful connection
 	SavePassword(host string, port int, database, user, password string) error
+
+	// AddToConnectionHistory saves connection to history and reloads dialog
+	AddToConnectionHistory(config models.ConnectionConfig)
+
+	// ClearPendingPasswordSave clears the pending password save
+	ClearPendingPasswordSave()
 }
 
 // DataAccess provides data loading operations

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebelice/lazypg/internal/app/delegates"
+	"github.com/rebelice/lazypg/internal/app/messages"
 	"github.com/rebelice/lazypg/internal/commands"
 	"github.com/rebelice/lazypg/internal/config"
 	"github.com/rebelice/lazypg/internal/connection_history"
@@ -181,98 +182,6 @@ func (a *App) initAppStyles() {
 			Bold(true),
 		overlayBg: lipgloss.Color("#555555"),
 	}
-}
-
-
-// DiscoveryCompleteMsg is sent when discovery completes
-type DiscoveryCompleteMsg struct {
-	Instances []models.DiscoveredInstance
-}
-
-// ErrorMsg is sent when an error occurs
-type ErrorMsg struct {
-	Title   string
-	Message string
-}
-
-// ConnectionStartMsg starts an async connection
-type ConnectionStartMsg struct {
-	Config models.ConnectionConfig
-}
-
-// ConnectionResultMsg is sent when connection attempt completes
-type ConnectionResultMsg struct {
-	Config models.ConnectionConfig
-	ConnID string
-	Err    error
-}
-
-// LoadTreeMsg requests loading the navigation tree
-type LoadTreeMsg struct{}
-
-// TreeLoadedMsg is sent when tree data is loaded
-type TreeLoadedMsg struct {
-	Root *models.TreeNode
-	Err  error
-}
-
-// LoadNodeChildrenMsg requests loading children for a tree node
-type LoadNodeChildrenMsg struct {
-	NodeID string
-}
-
-// NodeChildrenLoadedMsg is sent when node children are loaded
-type NodeChildrenLoadedMsg struct {
-	NodeID   string
-	Children []*models.TreeNode
-	Err      error
-}
-
-// LoadTableDataMsg requests loading table data
-type LoadTableDataMsg struct {
-	Schema     string
-	Table      string
-	Offset     int
-	Limit      int
-	SortColumn string
-	SortDir    string
-	NullsFirst bool
-}
-
-// TableDataLoadedMsg is sent when table data is loaded
-type TableDataLoadedMsg struct {
-	Columns   []string
-	Rows      [][]string
-	TotalRows int
-	Offset    int   // Offset used in the query (0 for initial load)
-	Err       error
-}
-
-// QueryResultMsg is sent when a query has been executed
-type QueryResultMsg struct {
-	SQL    string
-	Result models.QueryResult
-}
-
-// ObjectDetailsLoadedMsg is sent when object details are loaded
-type ObjectDetailsLoadedMsg struct {
-	ObjectType string // "function", "sequence", "extension", "type", "index", "trigger"
-	ObjectName string // "schema.name" for save operations
-	ObjectID   string // Unique ID for tab deduplication (e.g., "schema.function_name")
-	Title      string
-	Content    string // Formatted content to display
-	Err        error
-}
-
-// TabTableDataLoadedMsg is sent when table data for a tab is loaded
-type TabTableDataLoadedMsg struct {
-	ObjectID  string   // schema.table identifier
-	Schema    string
-	Table     string
-	Columns   []string
-	Rows      [][]string
-	TotalRows int
-	Err       error
 }
 
 // New creates a new App instance with config
@@ -491,7 +400,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle refresh command
 		if a.state.ActiveConnection != nil {
 			return a, func() tea.Msg {
-				return LoadTreeMsg{}
+				return messages.LoadTreeMsg{}
 			}
 		}
 		return a, nil
@@ -594,7 +503,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			func() tea.Msg {
 				conn, err := a.connectionManager.GetActive()
 				if err != nil {
-					return QueryResultMsg{
+					return messages.QueryResultMsg{
 						SQL: msg.SQL,
 						Result: models.QueryResult{
 							Error: fmt.Errorf("failed to get connection: %w", err),
@@ -603,14 +512,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				result := query.Execute(ctx, conn.Pool.GetPool(), msg.SQL)
-				return QueryResultMsg{
+				return messages.QueryResultMsg{
 					SQL:    msg.SQL,
 					Result: result,
 				}
 			},
 		)
 
-	case QueryResultMsg:
+	case messages.QueryResultMsg:
 		// Clear execution state
 		a.executeCancelFn = nil
 
@@ -736,7 +645,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, func() tea.Msg {
 			conn, err := a.connectionManager.GetActive()
 			if err != nil {
-				return QueryResultMsg{
+				return messages.QueryResultMsg{
 					SQL: msg.Favorite.Query,
 					Result: models.QueryResult{
 						Error: fmt.Errorf("connection error: %w", err),
@@ -745,7 +654,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			result := query.Execute(context.Background(), conn.Pool.GetPool(), msg.Favorite.Query)
-			return QueryResultMsg{
+			return messages.QueryResultMsg{
 				SQL:    msg.Favorite.Query,
 				Result: result,
 			}
@@ -883,7 +792,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case ErrorMsg:
+	case messages.ErrorMsg:
 		// Handle error messages
 		a.ShowError(msg.Title, msg.Message)
 		return a, nil
@@ -1221,7 +1130,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentTable != "" {
 				parts := strings.Split(a.currentTable, ".")
 				if len(parts) == 2 {
-					msg := LoadTableDataMsg{
+					msg := messages.LoadTableDataMsg{
 						Schema:     parts[0],
 						Table:      parts[1],
 						Limit:      100,
@@ -1243,7 +1152,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.activeFilter = nil
 				schemaNode := a.state.TreeSelected.Parent
 				if schemaNode != nil {
-					return a, a.loadTableData(LoadTableDataMsg{
+					return a, a.loadTableData(messages.LoadTableDataMsg{
 						Schema:     schemaNode.Label,
 						Table:      a.state.TreeSelected.Label,
 						Limit:      100,
@@ -1434,7 +1343,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							parts := strings.Split(a.currentTable, ".")
 							if len(parts) == 2 {
 								return a, func() tea.Msg {
-									return LoadTableDataMsg{
+									return messages.LoadTableDataMsg{
 										Schema:     parts[0],
 										Table:      parts[1],
 										Offset:     0,
@@ -1457,7 +1366,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							parts := strings.Split(a.currentTable, ".")
 							if len(parts) == 2 {
 								return a, func() tea.Msg {
-									return LoadTableDataMsg{
+									return messages.LoadTableDataMsg{
 										Schema:     parts[0],
 										Table:      parts[1],
 										Offset:     0,
@@ -1479,7 +1388,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							parts := strings.Split(a.currentTable, ".")
 							if len(parts) == 2 {
 								return a, func() tea.Msg {
-									return LoadTableDataMsg{
+									return messages.LoadTableDataMsg{
 										Schema:     parts[0],
 										Table:      parts[1],
 										Offset:     0,
@@ -1530,19 +1439,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	case DiscoveryCompleteMsg:
+	case messages.DiscoveryCompleteMsg:
 		// Update connection dialog with discovered instances
 		a.connectionDialog.SetDiscoveredInstances(msg.Instances)
 		return a, nil
 
-	case ConnectionStartMsg:
+	case messages.ConnectionStartMsg:
 		// Start async connection
 		a.isConnecting = true
 		a.connectingStart = time.Now()
 		a.connectingConfig = msg.Config
 		return a, tea.Batch(a.connectAsync(msg.Config), a.executeSpinner.Tick)
 
-	case ConnectionResultMsg:
+	case messages.ConnectionResultMsg:
 		// Ignore result if user already cancelled
 		if !a.isConnecting {
 			return a, nil
@@ -1596,16 +1505,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Trigger tree loading
 		a.showConnectionDialog = false
 		return a, func() tea.Msg {
-			return LoadTreeMsg{}
+			return messages.LoadTreeMsg{}
 		}
 
-	case LoadTreeMsg:
+	case messages.LoadTreeMsg:
 		a.treeView.IsLoading = true
 		a.treeView.LoadingStart = time.Now()
 		a.treeView.Root = nil // Clear root to show loading state
 		return a, tea.Batch(a.loadTree, a.executeSpinner.Tick)
 
-	case TreeLoadedMsg:
+	case messages.TreeLoadedMsg:
 		a.treeView.IsLoading = false
 		a.treeView.LoadingNodeID = ""
 		if msg.Err != nil {
@@ -1631,11 +1540,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case LoadNodeChildrenMsg:
+	case messages.LoadNodeChildrenMsg:
 		a.treeView.LoadingNodeID = msg.NodeID
 		return a, tea.Batch(a.loadNodeChildren(msg.NodeID), a.executeSpinner.Tick)
 
-	case NodeChildrenLoadedMsg:
+	case messages.NodeChildrenLoadedMsg:
 		a.treeView.LoadingNodeID = ""
 		if msg.Err != nil {
 			a.ShowError("Load Error", fmt.Sprintf("Failed to load children:\n\n%v", msg.Err))
@@ -1658,7 +1567,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Expanded && msg.Node != nil && !msg.Node.Loaded && len(msg.Node.Children) == 0 {
 			// Trigger lazy load
 			return a, func() tea.Msg {
-				return LoadNodeChildrenMsg{NodeID: msg.Node.ID}
+				return messages.LoadNodeChildrenMsg{NodeID: msg.Node.ID}
 			}
 		}
 		return a, nil
@@ -1803,10 +1712,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-	case LoadTableDataMsg:
+	case messages.LoadTableDataMsg:
 		return a, a.loadTableData(msg)
 
-	case ObjectDetailsLoadedMsg:
+	case messages.ObjectDetailsLoadedMsg:
 		a.isLoadingObjectDetails = false // Clear loading state
 		if msg.Err != nil {
 			a.ShowError("Error", fmt.Sprintf("Failed to load %s details:\n\n%v", msg.ObjectType, msg.Err))
@@ -1874,7 +1783,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case TableDataLoadedMsg:
+	case messages.TableDataLoadedMsg:
 		if msg.Err != nil {
 			a.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
 			return a, nil
@@ -1904,7 +1813,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tableView.IsPaginating = false
 		return a, nil
 
-	case TabTableDataLoadedMsg:
+	case messages.TabTableDataLoadedMsg:
 		// Clear loading state for the tab's table view
 		if tab := a.resultTabs.GetTabByObjectID(msg.ObjectID); tab != nil {
 			if sv := tab.Structure; sv != nil {
@@ -1973,7 +1882,7 @@ func (a *App) checkLazyLoad() tea.Cmd {
 		parts := strings.Split(a.currentTable, ".")
 		if len(parts) == 2 {
 			return func() tea.Msg {
-				return LoadTableDataMsg{
+				return messages.LoadTableDataMsg{
 					Schema:     parts[0],
 					Table:      parts[1],
 					Offset:     len(a.tableView.Rows),
@@ -3098,7 +3007,7 @@ func (a *App) connectToDiscoveredInstance(instance models.DiscoveredInstance) (t
 // performConnection starts an async connection attempt
 func (a *App) performConnection(config models.ConnectionConfig) (tea.Model, tea.Cmd) {
 	return a, func() tea.Msg {
-		return ConnectionStartMsg{Config: config}
+		return messages.ConnectionStartMsg{Config: config}
 	}
 }
 
@@ -3109,7 +3018,7 @@ func (a *App) connectAsync(config models.ConnectionConfig) tea.Cmd {
 		defer cancel()
 
 		connID, err := a.connectionManager.Connect(ctx, config)
-		return ConnectionResultMsg{
+		return messages.ConnectionResultMsg{
 			Config: config,
 			ConnID: connID,
 			Err:    err,
@@ -3455,7 +3364,7 @@ func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 
 				return a, func() tea.Msg {
-					return LoadTableDataMsg{
+					return messages.LoadTableDataMsg{
 						Schema: schema,
 						Table:  table,
 						Offset: 0,
@@ -3664,7 +3573,7 @@ func (a *App) triggerDiscovery() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		instances := a.discoverer.DiscoverAll(ctx)
-		return DiscoveryCompleteMsg{Instances: instances}
+		return messages.DiscoveryCompleteMsg{Instances: instances}
 	}
 }
 
@@ -3674,7 +3583,7 @@ func (a *App) loadTree() tea.Msg {
 
 	conn, err := a.connectionManager.GetActive()
 	if err != nil {
-		return TreeLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
+		return messages.TreeLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
 	}
 
 	currentDB := conn.Config.Database
@@ -3688,12 +3597,12 @@ func (a *App) loadTree() tea.Msg {
 	// Get all schema objects in ONE query
 	schemaObjects, err := metadata.GetAllSchemaObjects(ctx, conn.Pool)
 	if err != nil {
-		return TreeLoadedMsg{Err: fmt.Errorf("failed to load schema objects: %w", err)}
+		return messages.TreeLoadedMsg{Err: fmt.Errorf("failed to load schema objects: %w", err)}
 	}
 
 	dbNode := root.FindByID(fmt.Sprintf("db:%s", currentDB))
 	if dbNode == nil {
-		return TreeLoadedMsg{Root: root}
+		return messages.TreeLoadedMsg{Root: root}
 	}
 
 	// Organize objects by schema -> type -> names
@@ -4038,7 +3947,7 @@ func (a *App) loadTree() tea.Msg {
 		dbNode.AddChild(schemaNode)
 	}
 
-	return TreeLoadedMsg{Root: root}
+	return messages.TreeLoadedMsg{Root: root}
 }
 
 // loadNodeChildren loads children for table nodes (indexes and triggers).
@@ -4049,13 +3958,13 @@ func (a *App) loadNodeChildren(nodeID string) tea.Cmd {
 
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
+			return messages.NodeChildrenLoadedMsg{NodeID: nodeID, Err: err}
 		}
 
 		// Parse node ID to determine what to load
 		node := a.treeView.Root.FindByID(nodeID)
 		if node == nil {
-			return NodeChildrenLoadedMsg{NodeID: nodeID, Err: fmt.Errorf("node not found: %s", nodeID)}
+			return messages.NodeChildrenLoadedMsg{NodeID: nodeID, Err: fmt.Errorf("node not found: %s", nodeID)}
 		}
 
 		var children []*models.TreeNode
@@ -4113,7 +4022,7 @@ func (a *App) loadNodeChildren(nodeID string) tea.Cmd {
 			}
 		}
 
-		return NodeChildrenLoadedMsg{NodeID: nodeID, Children: children}
+		return messages.NodeChildrenLoadedMsg{NodeID: nodeID, Children: children}
 	}
 }
 
@@ -4131,13 +4040,13 @@ func extractSchemaAndTableFromNodeID(nodeID string) (string, string) {
 }
 
 // loadTableData loads table data with pagination
-func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
+func (a *App) loadTableData(msg messages.LoadTableDataMsg) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return TableDataLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
+			return messages.TableDataLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
 		}
 
 		var sort *metadata.SortOptions
@@ -4151,10 +4060,10 @@ func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
 
 		data, err := metadata.QueryTableData(ctx, conn.Pool, msg.Schema, msg.Table, msg.Offset, msg.Limit, sort)
 		if err != nil {
-			return TableDataLoadedMsg{Err: err}
+			return messages.TableDataLoadedMsg{Err: err}
 		}
 
-		return TableDataLoadedMsg{
+		return messages.TableDataLoadedMsg{
 			Columns:   data.Columns,
 			Rows:      data.Rows,
 			TotalRows: int(data.TotalRows),
@@ -4170,15 +4079,15 @@ func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
 
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return TabTableDataLoadedMsg{ObjectID: objectID, Err: fmt.Errorf("no active connection: %w", err)}
+			return messages.TabTableDataLoadedMsg{ObjectID: objectID, Err: fmt.Errorf("no active connection: %w", err)}
 		}
 
 		data, err := metadata.QueryTableData(ctx, conn.Pool, schema, table, 0, 100, nil)
 		if err != nil {
-			return TabTableDataLoadedMsg{ObjectID: objectID, Err: err}
+			return messages.TabTableDataLoadedMsg{ObjectID: objectID, Err: err}
 		}
 
-		return TabTableDataLoadedMsg{
+		return messages.TabTableDataLoadedMsg{
 			ObjectID:  objectID,
 			Schema:    schema,
 			Table:     table,
@@ -4194,25 +4103,25 @@ func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ErrorMsg{Title: "Connection Error", Message: err.Error()}
+			return messages.ErrorMsg{Title: "Connection Error", Message: err.Error()}
 		}
 
 		node := a.state.TreeSelected
 		if node == nil || node.Type != models.TreeNodeTypeTable {
-			return ErrorMsg{Title: "Error", Message: "No table selected"}
+			return messages.ErrorMsg{Title: "Error", Message: "No table selected"}
 		}
 
 		// Get schema from parent node
 		schemaNode := node.Parent
 		if schemaNode == nil {
-			return ErrorMsg{Title: "Error", Message: "Cannot determine schema"}
+			return messages.ErrorMsg{Title: "Error", Message: "Cannot determine schema"}
 		}
 
 		// Build filtered query
 		builder := filterBuilder.NewBuilder()
 		whereClause, args, err := builder.BuildWhere(filter)
 		if err != nil {
-			return ErrorMsg{Title: "Filter Error", Message: err.Error()}
+			return messages.ErrorMsg{Title: "Filter Error", Message: err.Error()}
 		}
 
 		// Construct query
@@ -4226,7 +4135,7 @@ func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
 		// Execute query
 		result, err := conn.Pool.QueryWithColumns(context.Background(), query, args...)
 		if err != nil {
-			return ErrorMsg{Title: "Query Error", Message: err.Error()}
+			return messages.ErrorMsg{Title: "Query Error", Message: err.Error()}
 		}
 
 		// Convert to string rows for display
@@ -4244,7 +4153,7 @@ func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
 			rows = append(rows, strRow)
 		}
 
-		return TableDataLoadedMsg{
+		return messages.TableDataLoadedMsg{
 			Columns:   result.Columns,
 			Rows:      rows,
 			TotalRows: len(rows),
@@ -4482,12 +4391,12 @@ func (a *App) loadFunctionSource(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "function", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		// Parse function name and arguments from node label
@@ -4502,14 +4411,14 @@ func (a *App) loadFunctionSource(node *models.TreeNode) tea.Cmd {
 		ctx := context.Background()
 		source, err := metadata.GetFunctionSource(ctx, conn.Pool, schema, name, args)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
 		}
 
 		title := fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments)
 		content := source.Definition
 		objectID := fmt.Sprintf("func:%s.%s(%s)", schema, source.Name, source.Arguments)
 
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "function",
 			ObjectName: fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments),
 			ObjectID:   objectID,
@@ -4524,25 +4433,25 @@ func (a *App) loadTriggerFunctionSource(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		source, err := metadata.GetTriggerFunctionSource(ctx, conn.Pool, schema, node.Label)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
 		}
 
 		title := fmt.Sprintf("%s.%s() → trigger", schema, source.Name)
 		content := source.Definition
 		objectID := fmt.Sprintf("trigfunc:%s.%s", schema, source.Name)
 
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "trigger_function",
 			ObjectName: fmt.Sprintf("%s.%s", schema, source.Name),
 			ObjectID:   objectID,
@@ -4557,18 +4466,18 @@ func (a *App) loadSequenceDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		details, err := metadata.GetSequenceDetails(ctx, conn.Pool, schema, node.Label)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
 		}
 
 		// Format as CREATE SEQUENCE statement
@@ -4591,7 +4500,7 @@ func (a *App) loadSequenceDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(";")
 
 		objectID := fmt.Sprintf("seq:%s.%s", schema, details.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "sequence",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s", schema, details.Name),
@@ -4605,19 +4514,19 @@ func (a *App) loadIndexDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		table := a.getTableFromNode(node)
 		if schema == "" || table == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("could not determine schema/table")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("could not determine schema/table")}
 		}
 
 		ctx := context.Background()
 		indexes, err := metadata.ListTableIndexes(ctx, conn.Pool, schema, table)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
 		}
 
 		// Find the specific index
@@ -4630,11 +4539,11 @@ func (a *App) loadIndexDetails(node *models.TreeNode) tea.Cmd {
 		}
 
 		if content == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("index %s not found", node.Label)}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("index %s not found", node.Label)}
 		}
 
 		objectID := fmt.Sprintf("idx:%s.%s.%s", schema, table, node.Label)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "index",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
@@ -4648,19 +4557,19 @@ func (a *App) loadTriggerDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		table := a.getTableFromNode(node)
 		if schema == "" || table == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("could not determine schema/table")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("could not determine schema/table")}
 		}
 
 		ctx := context.Background()
 		triggers, err := metadata.ListTableTriggers(ctx, conn.Pool, schema, table)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
 		}
 
 		// Find the specific trigger
@@ -4673,11 +4582,11 @@ func (a *App) loadTriggerDetails(node *models.TreeNode) tea.Cmd {
 		}
 
 		if content == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("trigger %s not found", node.Label)}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("trigger %s not found", node.Label)}
 		}
 
 		objectID := fmt.Sprintf("trig:%s.%s.%s", schema, table, node.Label)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "trigger",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
@@ -4691,7 +4600,7 @@ func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
 		}
 
 		// Parse extension name from label (format: "name vX.Y")
@@ -4703,7 +4612,7 @@ func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
 		ctx := context.Background()
 		details, err := metadata.GetExtensionDetails(ctx, conn.Pool, name)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
 		}
 
 		// Format as CREATE EXTENSION statement
@@ -4719,7 +4628,7 @@ func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(fmt.Sprintf("    VERSION '%s';", details.Version))
 
 		objectID := fmt.Sprintf("ext:%s", details.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "extension",
 			ObjectID:   objectID,
 			Title:      details.Name,
@@ -4733,18 +4642,18 @@ func (a *App) loadCompositeTypeDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		details, err := metadata.GetCompositeTypeDetails(ctx, conn.Pool, schema, node.Label)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		// Format as CREATE TYPE statement
@@ -4760,7 +4669,7 @@ func (a *App) loadCompositeTypeDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(");")
 
 		objectID := fmt.Sprintf("type:composite:%s.%s", schema, details.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "type",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (composite)", schema, details.Name),
@@ -4774,18 +4683,18 @@ func (a *App) loadEnumTypeDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		enums, err := metadata.ListEnumTypes(ctx, conn.Pool, schema)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		// Find the specific enum
@@ -4798,7 +4707,7 @@ func (a *App) loadEnumTypeDetails(node *models.TreeNode) tea.Cmd {
 		}
 
 		if enumType == nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("enum type %s not found", node.Label)}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("enum type %s not found", node.Label)}
 		}
 
 		// Format as CREATE TYPE statement
@@ -4814,7 +4723,7 @@ func (a *App) loadEnumTypeDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(");")
 
 		objectID := fmt.Sprintf("type:enum:%s.%s", schema, enumType.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "type",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (enum)", schema, enumType.Name),
@@ -4828,18 +4737,18 @@ func (a *App) loadDomainTypeDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		details, err := metadata.GetDomainTypeDetails(ctx, conn.Pool, schema, node.Label)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		// Format as CREATE DOMAIN statement
@@ -4857,7 +4766,7 @@ func (a *App) loadDomainTypeDetails(node *models.TreeNode) tea.Cmd {
 		b.WriteString(";")
 
 		objectID := fmt.Sprintf("type:domain:%s.%s", schema, details.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "type",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (domain)", schema, details.Name),
@@ -4871,18 +4780,18 @@ func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := a.connectionManager.GetActive()
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		schema := a.getSchemaFromNode(node)
 		if schema == "" {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
 		}
 
 		ctx := context.Background()
 		ranges, err := metadata.ListRangeTypes(ctx, conn.Pool, schema)
 		if err != nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
 		}
 
 		// Find the specific range type
@@ -4895,7 +4804,7 @@ func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
 		}
 
 		if rangeType == nil {
-			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("range type %s not found", node.Label)}
+			return messages.ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("range type %s not found", node.Label)}
 		}
 
 		// Format as CREATE TYPE statement
@@ -4903,7 +4812,7 @@ func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
 			schema, rangeType.Name, rangeType.Subtype)
 
 		objectID := fmt.Sprintf("type:range:%s.%s", schema, rangeType.Name)
-		return ObjectDetailsLoadedMsg{
+		return messages.ObjectDetailsLoadedMsg{
 			ObjectType: "type",
 			ObjectID:   objectID,
 			Title:      fmt.Sprintf("%s.%s (range)", schema, rangeType.Name),

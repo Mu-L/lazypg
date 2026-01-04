@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -153,6 +154,28 @@ func (a *App) SavePassword(host string, port int, database, user, password strin
 	return nil
 }
 
+// AddToConnectionHistory saves connection to history and reloads dialog
+func (a *App) AddToConnectionHistory(config models.ConnectionConfig) {
+	if a.connectionHistory != nil {
+		result, err := a.connectionHistory.Add(config)
+		if err != nil {
+			log.Printf("Warning: Failed to save connection to history: %v", err)
+		} else {
+			if result != nil && result.PasswordSaveError != nil {
+				log.Printf("Warning: Failed to save password: %v", result.PasswordSaveError)
+			}
+			// Reload history in dialog
+			history := a.connectionHistory.GetRecent(10)
+			a.connectionDialog.SetHistoryEntries(history)
+		}
+	}
+}
+
+// ClearPendingPasswordSave clears the pending password save
+func (a *App) ClearPendingPasswordSave() {
+	a.pendingPasswordSave = nil
+}
+
 // =============================================================================
 // DataAccess implementation
 // =============================================================================
@@ -169,7 +192,7 @@ func (a *App) LoadNodeChildren(nodeID string) tea.Cmd {
 
 // LoadTableData loads table data with options
 func (a *App) LoadTableData(schema, table string, offset, limit int, sortColumn, sortDir string, nullsFirst bool) tea.Cmd {
-	return a.loadTableData(LoadTableDataMsg{
+	return a.loadTableData(messages.LoadTableDataMsg{
 		Schema:     schema,
 		Table:      table,
 		Offset:     offset,

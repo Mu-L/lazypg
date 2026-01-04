@@ -68,7 +68,8 @@ func (d *ConnectionDelegate) handleConnectionResult(msg messages.ConnectionResul
 	app.SetConnecting(false)
 
 	if msg.Err != nil {
-		// Connection failed
+		// Connection failed - clear pending password (don't save wrong password)
+		app.ClearPendingPasswordSave()
 		app.ShowError("Connection Failed", fmt.Sprintf("Could not connect to %s:%d\n\nError: %v",
 			msg.Config.Host, msg.Config.Port, msg.Err))
 		return true, nil
@@ -94,6 +95,9 @@ func (d *ConnectionDelegate) handleConnectionResult(msg messages.ConnectionResul
 			})
 		}
 	}
+
+	// Save to connection history
+	app.AddToConnectionHistory(msg.Config)
 
 	// Hide connection dialog and trigger tree loading
 	app.SetShowConnectionDialog(false)
