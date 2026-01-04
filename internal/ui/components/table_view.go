@@ -449,9 +449,9 @@ func (tv *TableView) View() string {
 		// Build row content with cell-level zone marks
 		var rowBuilder strings.Builder
 		rowBuilder.WriteString(tv.renderLineNumber(i, isSelected))
-		rowBuilder.WriteString("  ") // Align with left indicator
+		rowBuilder.WriteString(leftIndicator) // Use same indicator as header
 		rowBuilder.WriteString(tv.renderRow(tv.Rows[i], isSelected, i, visibleRowIndex))
-		rowBuilder.WriteString("  ")
+		rowBuilder.WriteString(rightIndicator)
 
 		// Wrap entire row with zone mark for row-level click detection
 		zoneID := fmt.Sprintf("%s%d", ZoneTableRowPrefix, visibleRowIndex)
