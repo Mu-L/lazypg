@@ -1,0 +1,117 @@
+package delegates
+
+import (
+	"context"
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rebelice/lazypg/internal/app/messages"
+	"github.com/rebelice/lazypg/internal/models"
+	"github.com/rebelice/lazypg/internal/ui/components"
+)
+
+// DataDelegate handles table data loading and display messages.
+type DataDelegate struct{}
+
+// NewDataDelegate creates a new DataDelegate.
+func NewDataDelegate() *DataDelegate {
+	return &DataDelegate{}
+}
+
+// Name returns the delegate name.
+func (d *DataDelegate) Name() string {
+	return "data"
+}
+
+// Update processes data-related messages.
+func (d *DataDelegate) Update(msg tea.Msg, app AppAccess) (bool, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case messages.LoadTableDataMsg:
+		return true, app.LoadTableData(msg.Schema, msg.Table, msg.Offset, msg.Limit, msg.SortColumn, msg.SortDir, msg.NullsFirst)
+
+	case messages.TableDataLoadedMsg:
+		return d.handleTableDataLoaded(msg, app)
+
+	case messages.TabTableDataLoadedMsg:
+		return d.handleTabTableDataLoaded(msg, app)
+	}
+
+	return false, nil
+}
+
+// handleTableDataLoaded handles table data loading completion.
+func (d *DataDelegate) handleTableDataLoaded(msg messages.TableDataLoadedMsg, app AppAccess) (bool, tea.Cmd) {
+	if msg.Err != nil {
+		app.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
+		return true, nil
+	}
+
+	tableView := app.GetTableView()
+
+	// Check if this is initial load or pagination
+	// Initial load if:
+	// 1. No existing rows (first load ever)
+	// 2. Offset is 0 (fresh load request, even for same table)
+	// 3. Columns changed (different table selected)
+	isInitialLoad := len(tableView.Rows) == 0 ||
+		msg.Offset == 0 ||
+		(len(msg.Columns) > 0 && len(tableView.Columns) > 0 && msg.Columns[0] != tableView.Columns[0])
+
+	if isInitialLoad {
+		// Initial load - replace all data
+		tableView.SetData(msg.Columns, msg.Rows, msg.TotalRows)
+		tableView.SelectedRow = 0
+		tableView.TopRow = 0
+		app.SetFocusArea(models.FocusDataPanel)
+		app.UpdatePanelStyles()
+	} else {
+		// Append paginated data (same table, loading more rows)
+		tableView.Rows = append(tableView.Rows, msg.Rows...)
+		tableView.TotalRows = msg.TotalRows
+	}
+	tableView.IsPaginating = false
+	return true, nil
+}
+
+// handleTabTableDataLoaded handles table data loading for a specific tab.
+func (d *DataDelegate) handleTabTableDataLoaded(msg messages.TabTableDataLoadedMsg, app AppAccess) (bool, tea.Cmd) {
+	resultTabs := app.GetResultTabs()
+
+	// Clear loading state for the tab's table view
+	if tab := resultTabs.GetTabByObjectID(msg.ObjectID); tab != nil {
+		if sv := tab.Structure; sv != nil {
+			if tv := sv.GetTableView(); tv != nil {
+				tv.IsLoading = false
+			}
+		}
+	}
+
+	if msg.Err != nil {
+		app.ShowError("Database Error", fmt.Sprintf("Failed to load table data:\n\n%v", msg.Err))
+		return true, nil
+	}
+
+	// Find the tab with this objectID and update its data
+	for _, tab := range resultTabs.GetAllTabs() {
+		if tab.ObjectID == msg.ObjectID && tab.Type == components.TabTypeTableData {
+			if tab.Structure != nil {
+				// Set table data in the structure view
+				tab.Structure.GetTableView().SetData(msg.Columns, msg.Rows, msg.TotalRows)
+				// Also load structure metadata (columns, constraints, indexes)
+				connMgr := app.GetConnectionManager()
+				if connMgr != nil {
+					conn, err := connMgr.GetActive()
+					if err == nil && conn != nil && conn.Pool != nil {
+						ctx := context.Background()
+						_ = tab.Structure.SetTable(ctx, conn.Pool, msg.Schema, msg.Table)
+					}
+				}
+			}
+			break
+		}
+	}
+	app.SetFocusArea(models.FocusDataPanel)
+	app.UpdatePanelStyles()
+	return true, nil
+}

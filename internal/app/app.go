@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
+	"github.com/rebelice/lazypg/internal/app/delegates"
 	"github.com/rebelice/lazypg/internal/commands"
 	"github.com/rebelice/lazypg/internal/config"
 	"github.com/rebelice/lazypg/internal/connection_history"
@@ -128,6 +129,9 @@ type App struct {
 
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *appStyles
+
+	// Delegates for message handling (Phase 2 refactoring)
+	delegates []delegates.Delegate
 }
 
 // appStyles holds pre-computed styles for App rendering
@@ -400,6 +404,15 @@ func New(cfg *config.Config) *App {
 	// Initialize cached styles for performance
 	app.initAppStyles()
 
+	// Initialize delegates for message handling
+	app.delegates = []delegates.Delegate{
+		delegates.NewConnectionDelegate(),
+		delegates.NewTreeDelegate(),
+		delegates.NewDataDelegate(),
+		delegates.NewQueryDelegate(),
+		delegates.NewDialogDelegate(),
+	}
+
 	return app
 }
 
@@ -422,8 +435,24 @@ func (a *App) Init() tea.Cmd {
 	return a.connectionDialog.Init() // Always init textinput cursors
 }
 
+// dispatchToDelegate sends a message to all delegates until one handles it.
+// Returns true and a command if a delegate handled the message.
+func (a *App) dispatchToDelegate(msg tea.Msg) (bool, tea.Cmd) {
+	for _, d := range a.delegates {
+		if handled, cmd := d.Update(msg, a); handled {
+			return true, cmd
+		}
+	}
+	return false, nil
+}
+
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// First, try to dispatch to delegates
+	if handled, cmd := a.dispatchToDelegate(msg); handled {
+		return a, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		return a.handleMouseEvent(msg)
