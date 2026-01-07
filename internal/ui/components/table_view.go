@@ -81,6 +81,7 @@ type TableView struct {
 // tableViewStyles holds pre-computed styles for TableView rendering
 type tableViewStyles struct {
 	headerBg         lipgloss.Style
+	headerText       lipgloss.Style // Bold + foreground color for header text
 	headerLineNum    lipgloss.Style
 	headerSep        lipgloss.Style
 	separator        lipgloss.Style
@@ -127,6 +128,9 @@ func NewTableView(th theme.Theme) *TableView {
 func (tv *TableView) initStyles() {
 	tv.cachedStyles = &tableViewStyles{
 		headerBg: lipgloss.NewStyle().Background(tv.Theme.Selection),
+		headerText: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(tv.Theme.TableHeader),
 		headerLineNum: lipgloss.NewStyle().
 			Background(tv.Theme.Selection).
 			Foreground(tv.Theme.Metadata),
@@ -275,20 +279,34 @@ func (tv *TableView) calculateColumnWidths() {
 		desiredWidths[i] = runewidth.StringWidth(col) + 4
 	}
 
-	// Check row data
-	for _, row := range tv.Rows {
-		for i, cell := range row {
-			if i < numColumns {
-				cellLen := runewidth.StringWidth(cell)
-				if cellLen > desiredWidths[i] {
-					desiredWidths[i] = cellLen
+	// Step 2: Apply constraints (min/max width per column)
+	maxWidth := 50
+
+	// Check row data - sample first 100 rows for performance
+	// (checking all rows is O(rows*cols) which is too slow for large tables)
+	sampleSize := 100
+	if sampleSize > len(tv.Rows) {
+		sampleSize = len(tv.Rows)
+	}
+	// Only check first N bytes of each cell since we cap width at maxWidth anyway
+	// This avoids O(n) runewidth.StringWidth on multi-MB cells
+	maxCheckLen := maxWidth * 4 // Buffer for multi-byte chars
+	for i := 0; i < sampleSize; i++ {
+		row := tv.Rows[i]
+		for j, cell := range row {
+			if j < numColumns {
+				// Truncate before measuring to avoid processing huge strings
+				checkCell := cell
+				if len(checkCell) > maxCheckLen {
+					checkCell = checkCell[:maxCheckLen]
+				}
+				cellLen := runewidth.StringWidth(checkCell)
+				if cellLen > desiredWidths[j] {
+					desiredWidths[j] = cellLen
 				}
 			}
 		}
 	}
-
-	// Step 2: Apply constraints (min/max width per column)
-	maxWidth := 50
 	minWidth := 10
 
 	for i, w := range desiredWidths {
@@ -446,16 +464,16 @@ func (tv *TableView) View() string {
 		isSelected := i == tv.SelectedRow
 		visibleRowIndex := i - tv.TopRow
 
-		// Build row content with cell-level zone marks
-		var rowBuilder strings.Builder
-		rowBuilder.WriteString(tv.renderLineNumber(i, isSelected))
-		rowBuilder.WriteString(leftIndicator) // Use same indicator as header
-		rowBuilder.WriteString(tv.renderRow(tv.Rows[i], isSelected, i, visibleRowIndex))
-		rowBuilder.WriteString(rightIndicator)
+		// Build row content
+		rowContent := tv.renderLineNumber(i, isSelected) +
+			leftIndicator +
+			tv.renderRow(tv.Rows[i], isSelected, i, visibleRowIndex) +
+			rightIndicator
 
-		// Wrap entire row with zone mark for row-level click detection
-		zoneID := fmt.Sprintf("%s%d", ZoneTableRowPrefix, visibleRowIndex)
-		b.WriteString(zone.Mark(zoneID, rowBuilder.String()))
+		// Wrap with zone.Mark for mouse click support
+		// Use visibleRowIndex (0, 1, 2...) so app.go can calculate actual row as TopRow + visibleRowIndex
+		rowZoneID := fmt.Sprintf("%s%d", ZoneTableRowPrefix, visibleRowIndex)
+		b.WriteString(zone.Mark(rowZoneID, rowContent))
 
 		if i < endRow-1 {
 			b.WriteString("\n")
@@ -467,12 +485,12 @@ func (tv *TableView) View() string {
 	b.WriteString(tv.renderStatus())
 
 	// Render content and wrap in container with border
-	// Note: containerStyle.Width() sets the content width, border renders outside
 	return containerStyle.Width(contentWidth).Height(contentHeight).Render(b.String())
 }
 
 func (tv *TableView) renderHeader() string {
-	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
+	var b strings.Builder
+	b.Grow(tv.VisibleCols * 60)
 
 	// Use cached separator style
 	separator := tv.cachedStyles.separatorHeader.Render(" │ ")
@@ -483,7 +501,8 @@ func (tv *TableView) renderHeader() string {
 		endCol = len(tv.Columns)
 	}
 
-	for idx, i := 0, tv.LeftColOffset; i < endCol; i, idx = i+1, idx+1 {
+	colIndex := 0
+	for i := tv.LeftColOffset; i < endCol; i++ {
 		col := tv.Columns[i]
 		width := tv.ColumnWidths[i]
 		if width <= 0 {
@@ -511,28 +530,19 @@ func (tv *TableView) renderHeader() string {
 		// Use runewidth.Truncate for proper truncation
 		truncated := runewidth.Truncate(displayCol, width, "…")
 
-		// Apply width constraint inline (can't easily cache width-specific styles)
-		widthStyle := tv.cachedStyles.headerBg.Width(width).MaxWidth(width).Inline(true)
+		// Render cell with cached header background style and width control
+		renderedCell := tv.cachedStyles.headerBg.Width(width).MaxWidth(width).Inline(true).Render(truncated)
 
-		// Render cell with header background
-		renderedCell := widthStyle.Render(truncated)
-		s = append(s, renderedCell)
-
-		// Add separator between columns (but not after the last visible column)
-		if i < endCol-1 {
-			s = append(s, separator)
+		// Add separator before cell (except first)
+		if colIndex > 0 {
+			b.WriteString(separator)
 		}
+		b.WriteString(renderedCell)
+		colIndex++
 	}
 
-	// Join header cells horizontally with separators
-	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, s...)
-
-	// Apply bold and color to the entire row (this needs Bold which we don't cache with headerBg)
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(tv.Theme.TableHeader)
-
-	return headerStyle.Render(headerRow)
+	// Apply cached header text style to the entire row
+	return tv.cachedStyles.headerText.Render(b.String())
 }
 
 func (tv *TableView) renderSeparator() string {
@@ -558,7 +568,9 @@ func (tv *TableView) renderSeparator() string {
 }
 
 func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibleRowIndex int) string {
-	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
+	// Pre-allocate builder with estimated capacity
+	var b strings.Builder
+	b.Grow(tv.VisibleCols * 60) // Estimate ~60 chars per cell
 
 	// Use cached separator style
 	separator := tv.cachedStyles.separator.Render(" │ ")
@@ -581,8 +593,19 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 
 		value := row[i]
 
+		// CRITICAL: Truncate FIRST before any string processing!
+		// Cells can contain megabytes of data (e.g., JSONB columns)
+		// Processing the full string is O(n) and extremely slow
+		maxProcessLen := width * 4 // Allow some buffer for multi-byte chars
+		if len(value) > maxProcessLen {
+			value = value[:maxProcessLen]
+		}
+
+		// Replace newlines with spaces to keep content on single line
+		cellValue := strings.ReplaceAll(value, "\n", " ")
+		cellValue = strings.ReplaceAll(cellValue, "\r", "")
+
 		// Check if this looks like JSONB and format for display
-		cellValue := value
 		if jsonb.IsJSONB(cellValue) {
 			cellValue = jsonb.Truncate(cellValue, 50)
 		}
@@ -594,44 +617,34 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 		// Priority: selected cell > current match > other matches > selected row > normal
 		var cellStyle lipgloss.Style
 		if selected && i == tv.SelectedCol {
-			// Selected cell - highest priority, bright highlight
 			cellStyle = tv.cachedStyles.selectedCell
 		} else if tv.IsCurrentMatch(rowIndex, i) {
-			// Current search match - bright yellow highlight
 			cellStyle = tv.cachedStyles.currentMatch
 		} else if tv.IsMatch(rowIndex, i) {
-			// Other search match - subtle highlight
 			cellStyle = tv.cachedStyles.otherMatch
 		} else if selected {
-			// Selected row but not selected column - dim highlight
 			cellStyle = tv.cachedStyles.selectedRow
 		} else {
-			// Normal cell
 			cellStyle = tv.cachedStyles.normal
 		}
 
-		// Apply width constraint to the cell style and render
+		// Render with lipgloss width control for proper padding
 		renderedCell := cellStyle.Width(width).MaxWidth(width).Inline(true).Render(truncated)
 
-		// Wrap cell with zone mark for click detection
-		// Format: table-cell-{visibleRow}-{visibleCol}
-		zoneID := fmt.Sprintf("%s%d-%d", ZoneTableCellPrefix, visibleRowIndex, visibleColIndex)
-		renderedCell = zone.Mark(zoneID, renderedCell)
-
-		s = append(s, renderedCell)
-
-		// Add separator between columns (but not after the last visible column)
-		if i < endCol-1 {
-			s = append(s, separator)
+		// Add separator before cell (except first)
+		if visibleColIndex > 0 {
+			b.WriteString(separator)
 		}
+
+		// Wrap cell with zone.Mark for mouse click support
+		// Use visible indices so app.go can calculate actual as TopRow + visibleRow, LeftColOffset + visibleCol
+		cellZoneID := fmt.Sprintf("%s%d-%d", ZoneTableCellPrefix, visibleRowIndex, visibleColIndex)
+		b.WriteString(zone.Mark(cellZoneID, renderedCell))
 
 		visibleColIndex++
 	}
 
-	// Join cells horizontally with separators
-	rowStr := lipgloss.JoinHorizontal(lipgloss.Top, s...)
-
-	return rowStr
+	return b.String()
 }
 
 func (tv *TableView) renderStatus() string {

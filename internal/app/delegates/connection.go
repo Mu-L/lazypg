@@ -38,7 +38,8 @@ func (d *ConnectionDelegate) Update(msg tea.Msg, app AppAccess) (bool, tea.Cmd) 
 		app.SetConnecting(true)
 		app.SetConnectingStart(time.Now())
 		app.SetConnectingConfig(msg.Config)
-		return true, app.ConnectAsync(msg.Config)
+		// Return both connect command and spinner tick for timer updates
+		return true, tea.Batch(app.ConnectAsync(msg.Config), app.GetSpinnerTickCmd())
 
 	case messages.ConnectionResultMsg:
 		return d.handleConnectionResult(msg, app)

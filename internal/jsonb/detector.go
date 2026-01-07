@@ -1,38 +1,37 @@
 package jsonb
 
 import (
-	"encoding/json"
 	"strings"
 )
 
 // IsJSONB checks if a string value looks like JSONB
+// This is a fast heuristic check - it does NOT validate JSON syntax.
+// Used in render hot path, so must be O(1) without full JSON parsing.
 func IsJSONB(value string) bool {
 	if value == "" {
 		return false
 	}
 
-	// Quick check for JSON-like start
+	// Quick check for JSON-like start - O(1) operation
 	value = strings.TrimSpace(value)
-	if len(value) == 0 {
+	if len(value) < 2 {
 		return false
 	}
 
 	first := value[0]
-	if first != '{' && first != '[' && first != '"' {
-		// Could be null, true, false, or number
-		if value == "null" || value == "true" || value == "false" {
-			return true
-		}
-		// Try parsing as number
-		var f float64
-		err := json.Unmarshal([]byte(value), &f)
-		return err == nil
+	last := value[len(value)-1]
+
+	// Check for object: starts with { ends with }
+	if first == '{' && last == '}' {
+		return true
 	}
 
-	// Try to parse as JSON
-	var parsed interface{}
-	err := json.Unmarshal([]byte(value), &parsed)
-	return err == nil
+	// Check for array: starts with [ ends with ]
+	if first == '[' && last == ']' {
+		return true
+	}
+
+	return false
 }
 
 // Truncate truncates a JSON string for table display

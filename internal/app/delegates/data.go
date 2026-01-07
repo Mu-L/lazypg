@@ -1,7 +1,6 @@
 package delegates
 
 import (
-	"context"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -98,15 +97,8 @@ func (d *DataDelegate) handleTabTableDataLoaded(msg messages.TabTableDataLoadedM
 			if tab.Structure != nil {
 				// Set table data in the structure view
 				tab.Structure.GetTableView().SetData(msg.Columns, msg.Rows, msg.TotalRows)
-				// Also load structure metadata (columns, constraints, indexes)
-				connMgr := app.GetConnectionManager()
-				if connMgr != nil {
-					conn, err := connMgr.GetActive()
-					if err == nil && conn != nil && conn.Pool != nil {
-						ctx := context.Background()
-						_ = tab.Structure.SetTable(ctx, conn.Pool, msg.Schema, msg.Table)
-					}
-				}
+				// Note: Structure metadata (columns, constraints, indexes) is loaded
+				// lazily when user switches to those tabs to avoid blocking the UI
 			}
 			break
 		}

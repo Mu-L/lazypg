@@ -25,11 +25,17 @@ type SortOptions struct {
 
 // QueryTableData fetches paginated table data with optional sorting
 func QueryTableData(ctx context.Context, pool *connection.Pool, schema, table string, offset, limit int, sort *SortOptions) (*TableData, error) {
-	// First get total count
-	countQuery := fmt.Sprintf("SELECT COUNT(*) as count FROM %s.%s", schema, table)
-	countRow, err := pool.QueryRow(ctx, countQuery)
+	// Get approximate row count from pg_class (instant, no table scan)
+	// This is much faster than COUNT(*) for large tables
+	estimateQuery := fmt.Sprintf(`
+		SELECT COALESCE(reltuples::bigint, 0) as count
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = '%s' AND n.nspname = '%s'`, table, schema)
+	countRow, err := pool.QueryRow(ctx, estimateQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count rows: %w", err)
+		// Fallback: if estimate fails, use 0 (will show as loaded rows)
+		countRow = map[string]interface{}{"count": int64(0)}
 	}
 
 	totalRows := int64(0)
