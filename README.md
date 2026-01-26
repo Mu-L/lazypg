@@ -93,7 +93,7 @@ brew install rebelice/tap/lazypg
 ### Go Install
 
 ```bash
-go install github.com/rebelice/lazypg@latest
+go install github.com/rebelice/lazypg/cmd/lazypg@latest
 ```
 
 ### Download Binary
