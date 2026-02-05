@@ -444,20 +444,28 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 			jv.adjustScroll()
 		}
 
-	case "J":
-		// Jump to next sibling
-		jv.jumpToNextSibling()
-
-	case "K":
-		// Jump to previous sibling
-		jv.jumpToPrevSibling()
-
 	case "p":
 		// Toggle preview pane
 		if jv.previewPane != nil {
 			// Update content before toggling (so it has latest selection)
 			jv.updatePreviewPane()
 			jv.previewPane.Toggle()
+		}
+
+	case "K":
+		// Scroll preview pane up (when visible), otherwise jump to previous sibling
+		if jv.previewPane != nil && jv.previewPane.Visible {
+			jv.previewPane.ScrollUp()
+		} else {
+			jv.jumpToPrevSibling()
+		}
+
+	case "J":
+		// Scroll preview pane down (when visible), otherwise jump to next sibling
+		if jv.previewPane != nil && jv.previewPane.Visible {
+			jv.previewPane.ScrollDown()
+		} else {
+			jv.jumpToNextSibling()
 		}
 
 	case "P":
@@ -846,7 +854,7 @@ func (jv *JSONBViewer) RenderPreviewPanel(width, height int) string {
 	// Footer with help text
 	helpParts := []string{}
 	if jv.previewPane.IsScrollable() {
-		helpParts = append(helpParts, "Ctrl-↑↓: Scroll")
+		helpParts = append(helpParts, "J/K: Scroll")
 	}
 	helpParts = append(helpParts, "y: Copy", "p: Toggle")
 

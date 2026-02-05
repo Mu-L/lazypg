@@ -1227,10 +1227,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Handle preview pane scrolling (when visible)
 				if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
 					switch msg.String() {
-					case "ctrl+up":
+					case "K":
 						activeTable.PreviewPane.ScrollUp()
 						return a, nil
-					case "ctrl+down":
+					case "J":
 						activeTable.PreviewPane.ScrollDown()
 						return a, nil
 					}
@@ -1419,12 +1419,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					return a, nil
-				case "J":
-					// Open JSONB viewer if cell contains JSONB (uppercase J to avoid conflict with vim down)
+				case "v":
+					// Open JSONB viewer if cell contains JSONB
 					selectedRow, selectedCol := activeTable.GetSelectedCell()
 					if selectedRow >= 0 && selectedCol >= 0 && selectedRow < len(activeTable.Rows) && selectedCol < len(activeTable.Columns) {
 						cellValue := activeTable.Rows[selectedRow][selectedCol]
 						if jsonb.IsJSONB(cellValue) {
+							// Set viewer dimensions based on terminal size (with max width limit)
+							viewerWidth := a.state.Width * 2 / 3
+							if viewerWidth > 100 {
+								viewerWidth = 100
+							}
+							a.jsonbViewer.Width = viewerWidth
+							a.jsonbViewer.Height = a.state.Height * 3 / 4
 							if err := a.jsonbViewer.SetValue(cellValue); err == nil {
 								a.showJSONBViewer = true
 							}
@@ -3007,6 +3014,13 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 								cellValue := activeTable.Rows[actualRow][actualCol]
 								// Check if it's JSON/JSONB data
 								if jsonb.IsJSONB(cellValue) {
+									// Set viewer dimensions based on terminal size (with max width limit)
+									viewerWidth := a.state.Width * 2 / 3
+									if viewerWidth > 100 {
+										viewerWidth = 100
+									}
+									a.jsonbViewer.Width = viewerWidth
+									a.jsonbViewer.Height = a.state.Height * 3 / 4
 									if err := a.jsonbViewer.SetValue(cellValue); err == nil {
 										a.showJSONBViewer = true
 									}

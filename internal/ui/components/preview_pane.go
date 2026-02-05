@@ -260,13 +260,13 @@ func (p *PreviewPane) View() string {
 	// Build help text - use abbreviated form for narrow panes
 	helpParts := []string{}
 	if p.IsScrollable() {
-		helpParts = append(helpParts, "↑↓")
+		helpParts = append(helpParts, "J/K:scroll")
 	}
 	helpParts = append(helpParts, "y:copy", "p:close")
 
 	// Add JSONB hint if content is JSON
 	if jsonb.IsJSONB(p.Content) {
-		helpParts = append(helpParts, "J:tree")
+		helpParts = append(helpParts, "v:tree")
 	}
 
 	helpText := strings.Join(helpParts, " ")
