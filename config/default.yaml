@@ -23,6 +23,9 @@ data:
   max_cell_display_length: 100
   jsonb_auto_format: true
   large_table_threshold: 1000000
+  prefetch_threshold: 50
+  prefetch_size: 100
+  max_pinned_rows: 5
 
 history:
   enabled: true

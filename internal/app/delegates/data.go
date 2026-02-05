@@ -2,6 +2,7 @@ package delegates
 
 import (
 	"fmt"
+	"log"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rebelice/lazypg/internal/app/messages"
@@ -34,6 +35,12 @@ func (d *DataDelegate) Update(msg tea.Msg, app AppAccess) (bool, tea.Cmd) {
 
 	case messages.TabTableDataLoadedMsg:
 		return d.handleTabTableDataLoaded(msg, app)
+
+	case messages.PrefetchDataMsg:
+		return true, app.PrefetchData(msg.Schema, msg.Table, msg.Offset, msg.Limit, msg.SortColumn, msg.SortDir, msg.NullsFirst)
+
+	case messages.PrefetchCompleteMsg:
+		return d.handlePrefetchComplete(msg, app)
 	}
 
 	return false, nil
@@ -105,5 +112,27 @@ func (d *DataDelegate) handleTabTableDataLoaded(msg messages.TabTableDataLoadedM
 	}
 	app.SetFocusArea(models.FocusDataPanel)
 	app.UpdatePanelStyles()
+	return true, nil
+}
+
+// handlePrefetchComplete handles prefetch data completion.
+func (d *DataDelegate) handlePrefetchComplete(msg messages.PrefetchCompleteMsg, app AppAccess) (bool, tea.Cmd) {
+	tableView := app.GetActiveTableView()
+	if tableView == nil {
+		return true, nil
+	}
+
+	tableView.IsPrefetching = false
+	tableView.IsPaginating = false
+
+	if msg.Err != nil {
+		// Silent fail for prefetch - don't show error to user
+		log.Printf("Warning: prefetch failed at offset %d: %v", msg.Offset, msg.Err)
+		return true, nil
+	}
+
+	// Append prefetched rows
+	tableView.Rows = append(tableView.Rows, msg.Rows...)
+
 	return true, nil
 }

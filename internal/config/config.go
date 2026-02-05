@@ -44,6 +44,9 @@ type DataConfig struct {
 	MaxCellDisplayLength int  `mapstructure:"max_cell_display_length"`
 	JSONBAutoFormat      bool `mapstructure:"jsonb_auto_format"`
 	LargeTableThreshold  int  `mapstructure:"large_table_threshold"`
+	PrefetchThreshold    int  `mapstructure:"prefetch_threshold"`
+	PrefetchSize         int  `mapstructure:"prefetch_size"`
+	MaxPinnedRows        int  `mapstructure:"max_pinned_rows"`
 }
 
 type HistoryConfig struct {
@@ -85,6 +88,9 @@ func GetDefaults() *Config {
 			MaxCellDisplayLength: 100,
 			JSONBAutoFormat:      true,
 			LargeTableThreshold:  1000000,
+			PrefetchThreshold:    50,
+			PrefetchSize:         100,
+			MaxPinnedRows:        5,
 		},
 		History: HistoryConfig{
 			Enabled:           true,
@@ -137,6 +143,9 @@ func Load() (*Config, error) {
 	v.SetDefault("data.max_cell_display_length", 100)
 	v.SetDefault("data.jsonb_auto_format", true)
 	v.SetDefault("data.large_table_threshold", 1000000)
+	v.SetDefault("data.prefetch_threshold", 50)
+	v.SetDefault("data.prefetch_size", 100)
+	v.SetDefault("data.max_pinned_rows", 5)
 	v.SetDefault("history.enabled", true)
 	v.SetDefault("history.max_entries", 1000)
 	v.SetDefault("history.persist", true)

@@ -138,6 +138,9 @@ type DataAccess interface {
 
 	// SetActiveFilter sets the active filter
 	SetActiveFilter(filter *models.Filter)
+
+	// PrefetchData prefetches table data in background
+	PrefetchData(schema, table string, offset, limit int, sortCol, sortDir string, nullsFirst bool) tea.Cmd
 }
 
 // QueryAccess provides query execution operations

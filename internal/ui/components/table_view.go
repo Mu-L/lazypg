@@ -74,6 +74,15 @@ type TableView struct {
 	LoadingStart  time.Time      // When loading started
 	Spinner       *spinner.Model // Shared spinner instance
 
+	// Pin state
+	PinnedRows    []int      // Indices of pinned rows
+	PinnedData    [][]string // Data copy of pinned rows
+	MaxPinnedRows int        // Maximum number of pinned rows (default 5)
+
+	// Prefetch state
+	IsPrefetching     bool // Whether a prefetch is in progress
+	PrefetchThreshold int  // Distance from end to trigger prefetch
+
 	// Cached styles for performance (avoid recreating on every render)
 	cachedStyles *tableViewStyles
 }
@@ -98,6 +107,9 @@ type tableViewStyles struct {
 	status           lipgloss.Style
 	containerNormal  lipgloss.Style // Container border style when not focused
 	containerFocused lipgloss.Style // Container border style when focused
+	pinnedRow        lipgloss.Style
+	pinnedMarker     lipgloss.Style
+	pinnedSep        lipgloss.Style
 }
 
 // MatchPos represents a search match position
@@ -119,6 +131,10 @@ func NewTableView(th theme.Theme) *TableView {
 		PreviewPane:     NewPreviewPane(th),
 		ShowLineNumbers: true,  // Default to showing line numbers
 		RelativeNumbers: false, // Default to absolute line numbers
+		MaxPinnedRows:     5,
+		PinnedRows:        []int{},
+		PinnedData:        [][]string{},
+		PrefetchThreshold: 50,
 	}
 	tv.initStyles()
 	return tv
@@ -174,6 +190,14 @@ func (tv *TableView) initStyles() {
 		containerFocused: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(tv.Theme.BorderFocused),
+		pinnedRow: lipgloss.NewStyle().
+			Background(tv.Theme.Selection).
+			Foreground(tv.Theme.Info),
+		pinnedMarker: lipgloss.NewStyle().
+			Foreground(tv.Theme.Warning).
+			Bold(true),
+		pinnedSep: lipgloss.NewStyle().
+			Foreground(tv.Theme.Border),
 	}
 }
 
@@ -185,12 +209,8 @@ func (tv *TableView) SetData(columns []string, rows [][]string, totalRows int) {
 	tv.calculateColumnWidths()
 }
 
-// getLineNumberWidth returns the width needed for line number column
-func (tv *TableView) getLineNumberWidth() int {
-	if !tv.ShowLineNumbers {
-		return 0
-	}
-	// Calculate digits needed for max row number
+// getLineNumberDigits returns the number of digits needed for line numbers
+func (tv *TableView) getLineNumberDigits() int {
 	maxRow := tv.TotalRows
 	if maxRow < len(tv.Rows) {
 		maxRow = len(tv.Rows)
@@ -202,8 +222,16 @@ func (tv *TableView) getLineNumberWidth() int {
 	if digits < 2 {
 		digits = 2 // Minimum 2 digits
 	}
+	return digits
+}
+
+// getLineNumberWidth returns the width needed for line number column
+func (tv *TableView) getLineNumberWidth() int {
+	if !tv.ShowLineNumbers {
+		return 0
+	}
 	// Width = digits + 1 space + separator "│ "
-	return digits + 3
+	return tv.getLineNumberDigits() + 3
 }
 
 // renderLineNumber renders the line number for a row
@@ -225,18 +253,7 @@ func (tv *TableView) renderLineNumber(rowIndex int, isSelected bool) string {
 		displayNum = rowIndex + 1 // 1-indexed
 	}
 
-	// Calculate width for formatting
-	maxRow := tv.TotalRows
-	if maxRow < len(tv.Rows) {
-		maxRow = len(tv.Rows)
-	}
-	if maxRow == 0 {
-		maxRow = 1
-	}
-	digits := len(fmt.Sprintf("%d", maxRow))
-	if digits < 2 {
-		digits = 2
-	}
+	digits := tv.getLineNumberDigits()
 
 	// Format the number right-aligned
 	numStr := fmt.Sprintf("%*d", digits, displayNum)
@@ -446,10 +463,19 @@ func (tv *TableView) View() string {
 	b.WriteString(tv.cachedStyles.border.Render("──"))
 	b.WriteString("\n")
 
+	// Render pinned rows (if any)
+	if len(tv.PinnedRows) > 0 {
+		b.WriteString(tv.renderPinnedRows())
+	}
+
 	// Calculate how many rows we can show
 	// contentHeight is the content area height (inside border)
 	// Subtract 3 for header + separator + status line
-	tv.VisibleRows = contentHeight - 3
+	pinnedHeight := len(tv.PinnedRows)
+	if pinnedHeight > 0 {
+		pinnedHeight += 1 // Add 1 for pinned separator
+	}
+	tv.VisibleRows = contentHeight - 3 - pinnedHeight
 	if tv.VisibleRows < 1 {
 		tv.VisibleRows = 1
 	}
@@ -647,6 +673,110 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int, visibl
 	return b.String()
 }
 
+// renderPinnedRows renders the pinned rows section
+func (tv *TableView) renderPinnedRows() string {
+	if len(tv.PinnedRows) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	lineNumWidth := tv.getLineNumberWidth()
+
+	for i, rowIdx := range tv.PinnedRows {
+		if i >= len(tv.PinnedData) {
+			continue
+		}
+
+		isSelected := rowIdx == tv.SelectedRow
+
+		// Render pin marker + line number
+		// Pin marker replaces first char of padding to keep alignment
+		if tv.ShowLineNumbers {
+			digits := tv.getLineNumberDigits()
+
+			// Format: "*" + number with (digits-1) width = total digits chars
+			marker := tv.cachedStyles.pinnedMarker.Render("*")
+			numStr := fmt.Sprintf("%*d", digits-1, rowIdx+1)
+			b.WriteString(marker)
+			b.WriteString(tv.cachedStyles.lineNumNormal.Render(numStr))
+			b.WriteString(tv.cachedStyles.separator.Render(" │ "))
+		}
+
+		// Left indicator placeholder
+		b.WriteString("  ")
+
+		// Render the row cells
+		b.WriteString(tv.renderPinnedRowCells(tv.PinnedData[i], isSelected, rowIdx))
+
+		// Right indicator placeholder
+		b.WriteString("  ")
+		b.WriteString("\n")
+	}
+
+	// Pinned separator (dashed line)
+	sepLine := strings.Repeat("─", lineNumWidth+2)
+	for i := tv.LeftColOffset; i < tv.LeftColOffset+tv.VisibleCols && i < len(tv.ColumnWidths); i++ {
+		if i > tv.LeftColOffset {
+			sepLine += "─┼─"
+		}
+		sepLine += strings.Repeat("─", tv.ColumnWidths[i])
+	}
+	sepLine += "────"
+	b.WriteString(tv.cachedStyles.pinnedSep.Render(sepLine))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderPinnedRowCells renders cells for a single pinned row
+func (tv *TableView) renderPinnedRowCells(row []string, selected bool, rowIndex int) string {
+	var b strings.Builder
+	separator := tv.cachedStyles.separator.Render(" │ ")
+
+	endCol := tv.LeftColOffset + tv.VisibleCols
+	if endCol > len(tv.ColumnWidths) {
+		endCol = len(tv.ColumnWidths)
+	}
+
+	visibleColIndex := 0
+	for i := tv.LeftColOffset; i < endCol; i++ {
+		if i >= len(row) || i >= len(tv.ColumnWidths) {
+			break
+		}
+		width := tv.ColumnWidths[i]
+		if width <= 0 {
+			continue
+		}
+
+		value := row[i]
+		maxProcessLen := width * 4
+		if len(value) > maxProcessLen {
+			value = value[:maxProcessLen]
+		}
+
+		cellValue := strings.ReplaceAll(value, "\n", " ")
+		cellValue = strings.ReplaceAll(cellValue, "\r", "")
+		truncated := runewidth.Truncate(cellValue, width, "…")
+
+		var cellStyle lipgloss.Style
+		if selected && i == tv.SelectedCol {
+			cellStyle = tv.cachedStyles.selectedCell
+		} else {
+			cellStyle = tv.cachedStyles.pinnedRow
+		}
+
+		renderedCell := cellStyle.Width(width).MaxWidth(width).Inline(true).Render(truncated)
+
+		if visibleColIndex > 0 {
+			b.WriteString(separator)
+		}
+		b.WriteString(renderedCell)
+		visibleColIndex++
+	}
+
+	return b.String()
+}
+
 func (tv *TableView) renderStatus() string {
 	// Show pagination loading indicator
 	if tv.IsPaginating {
@@ -658,9 +788,9 @@ func (tv *TableView) renderStatus() string {
 		return tv.cachedStyles.status.Render(paginatingText)
 	}
 
-	endRow := tv.TopRow + len(tv.Rows)
-	if endRow > tv.TotalRows {
-		endRow = tv.TotalRows
+	endRow := tv.TopRow + tv.VisibleRows
+	if endRow > len(tv.Rows) {
+		endRow = len(tv.Rows)
 	}
 
 	// Search match info
@@ -679,7 +809,13 @@ func (tv *TableView) renderStatus() string {
 		colInfo = fmt.Sprintf("Cols %d-%d of %d │ ", tv.LeftColOffset+1, endCol, len(tv.Columns))
 	}
 
-	showing := fmt.Sprintf(" 󰈙 %s%s%d-%d of %d rows", matchInfo, colInfo, tv.TopRow+1, endRow, tv.TotalRows)
+	// Pinned rows info
+	pinnedInfo := ""
+	if len(tv.PinnedRows) > 0 {
+		pinnedInfo = fmt.Sprintf("%d pinned │ ", len(tv.PinnedRows))
+	}
+
+	showing := fmt.Sprintf(" 󰈙 %s%s%s%d-%d of %d rows", matchInfo, colInfo, pinnedInfo, tv.TopRow+1, endRow, tv.TotalRows)
 	return tv.cachedStyles.status.Render(showing)
 }
 
@@ -1325,4 +1461,104 @@ func (tv *TableView) GetVimMotionStatus() string {
 // HasPendingVimMotion returns true if there's pending vim motion input
 func (tv *TableView) HasPendingVimMotion() bool {
 	return tv.PendingCount != "" || tv.PendingG
+}
+
+// TogglePin pins or unpins the currently selected row
+func (tv *TableView) TogglePin() error {
+	rowIndex := tv.SelectedRow
+
+	// Check if already pinned
+	for i, pinnedIdx := range tv.PinnedRows {
+		if pinnedIdx == rowIndex {
+			// Unpin
+			tv.PinnedRows = append(tv.PinnedRows[:i], tv.PinnedRows[i+1:]...)
+			tv.PinnedData = append(tv.PinnedData[:i], tv.PinnedData[i+1:]...)
+			return nil
+		}
+	}
+
+	// Pin
+	if tv.MaxPinnedRows > 0 && len(tv.PinnedRows) >= tv.MaxPinnedRows {
+		return fmt.Errorf("maximum pinned rows (%d) reached", tv.MaxPinnedRows)
+	}
+
+	if rowIndex < 0 || rowIndex >= len(tv.Rows) {
+		return fmt.Errorf("invalid row index: %d", rowIndex)
+	}
+
+	// Copy the row data
+	rowData := make([]string, len(tv.Rows[rowIndex]))
+	copy(rowData, tv.Rows[rowIndex])
+
+	tv.PinnedRows = append(tv.PinnedRows, rowIndex)
+	tv.PinnedData = append(tv.PinnedData, rowData)
+	return nil
+}
+
+// IsPinned returns true if the given row is pinned
+func (tv *TableView) IsPinned(rowIndex int) bool {
+	for _, pinnedIdx := range tv.PinnedRows {
+		if pinnedIdx == rowIndex {
+			return true
+		}
+	}
+	return false
+}
+
+// ClearPins removes all pinned rows
+func (tv *TableView) ClearPins() {
+	tv.PinnedRows = nil
+	tv.PinnedData = nil
+}
+
+// GetPinnedCount returns the number of pinned rows
+func (tv *TableView) GetPinnedCount() int {
+	return len(tv.PinnedRows)
+}
+
+// JumpToNextPinnedRow cycles through pinned rows
+// If current row is not pinned, jumps to first pinned row
+// If current row is pinned, jumps to next pinned row (wraps around)
+func (tv *TableView) JumpToNextPinnedRow() {
+	if len(tv.PinnedRows) == 0 {
+		return
+	}
+
+	// Find current position in pinned rows
+	currentIdx := -1
+	for i, pinnedRow := range tv.PinnedRows {
+		if pinnedRow == tv.SelectedRow {
+			currentIdx = i
+			break
+		}
+	}
+
+	// Jump to next pinned row (or first if not on pinned row)
+	nextIdx := 0
+	if currentIdx >= 0 {
+		nextIdx = (currentIdx + 1) % len(tv.PinnedRows)
+	}
+
+	// Set selected row and ensure it's visible
+	tv.SelectedRow = tv.PinnedRows[nextIdx]
+
+	// Adjust visible window if needed
+	if tv.SelectedRow < tv.TopRow {
+		tv.TopRow = tv.SelectedRow
+	}
+	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
+		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
+	}
+}
+
+// NeedsPrefetch returns true if background prefetch should be triggered
+func (tv *TableView) NeedsPrefetch() bool {
+	if tv.IsPaginating || tv.IsPrefetching {
+		return false
+	}
+	if tv.PrefetchThreshold <= 0 {
+		return false
+	}
+	remaining := len(tv.Rows) - tv.SelectedRow
+	return remaining < tv.PrefetchThreshold && len(tv.Rows) < tv.TotalRows
 }

@@ -73,6 +73,24 @@ type TableDataLoadedMsg struct {
 	Err       error
 }
 
+// PrefetchDataMsg requests prefetching data in background
+type PrefetchDataMsg struct {
+	Schema     string
+	Table      string
+	Offset     int
+	Limit      int
+	SortColumn string
+	SortDir    string
+	NullsFirst bool
+}
+
+// PrefetchCompleteMsg is sent when prefetch completes
+type PrefetchCompleteMsg struct {
+	Rows   [][]string
+	Offset int
+	Err    error
+}
+
 // QueryResultMsg is sent when a query has been executed
 type QueryResultMsg struct {
 	SQL    string

@@ -1260,6 +1260,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Handle pin toggle (Shift+8 = *)
+				if msg.String() == "*" {
+					if activeTable != nil {
+						if err := activeTable.TogglePin(); err != nil {
+							log.Printf("Pin error: %v", err)
+						}
+					}
+					return a, nil
+				}
+
+				// Handle jump to pinned rows (cycle through)
+				if msg.String() == "'" {
+					if activeTable != nil {
+						activeTable.JumpToNextPinnedRow()
+					}
+					return a, nil
+				}
+
 				// If structure view is active (not on Data tab) and no Result Tabs, route to structure view
 				if a.currentTab > 0 && !a.resultTabs.HasTabs() {
 					a.structureView.Update(msg)
@@ -1280,11 +1298,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Handle Vim motion (number prefixes, g, G, etc.)
 				// This must come before individual key handling
 				if activeTable.HandleVimMotion(msg.String()) {
-					// Check if we need to load more data after vim motion (only for main table)
-					if !a.resultTabs.HasTabs() {
-						if cmd := a.checkLazyLoad(); cmd != nil {
-							return a, cmd
-						}
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
 					}
 					return a, nil
 				}
@@ -1295,10 +1310,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "down":
 					activeTable.MoveSelection(1)
-					if !a.resultTabs.HasTabs() {
-						if cmd := a.checkLazyLoad(); cmd != nil {
-							return a, cmd
-						}
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
 					}
 					return a, nil
 				case "left", "h":
@@ -1328,10 +1341,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "ctrl+d":
 					activeTable.PageDown()
-					if !a.resultTabs.HasTabs() {
-						if cmd := a.checkLazyLoad(); cmd != nil {
-							return a, cmd
-						}
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
 					}
 					return a, nil
 				case "s":
@@ -1870,31 +1881,155 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// checkLazyLoad checks if we need to load more data and returns a command if so
-func (a *App) checkLazyLoad() tea.Cmd {
-	// Check if we need to load more data (lazy loading)
-	if a.tableView.SelectedRow >= len(a.tableView.Rows)-10 &&
-		len(a.tableView.Rows) < a.tableView.TotalRows &&
-		a.currentTable != "" {
-		// Set pagination loading state
-		a.tableView.IsPaginating = true
-		// Parse schema and table from currentTable
-		parts := strings.Split(a.currentTable, ".")
-		if len(parts) == 2 {
-			return func() tea.Msg {
-				return messages.LoadTableDataMsg{
-					Schema:     parts[0],
-					Table:      parts[1],
-					Offset:     len(a.tableView.Rows),
-					Limit:      100,
-					SortColumn: a.tableView.GetSortColumn(),
-					SortDir:    a.tableView.GetSortDirection(),
-					NullsFirst: a.tableView.GetNullsFirst(),
-				}
+// getActiveSchemaTable returns the schema and table name for the active context.
+// For tab-based views, it extracts from the active tab's ObjectID.
+// Otherwise, it parses a.currentTable.
+func (a *App) getActiveSchemaTable() (string, string) {
+	if a.resultTabs.HasTabs() {
+		tab := a.resultTabs.GetActiveTab()
+		if tab != nil && tab.Type == components.TabTypeTableData && tab.ObjectID != "" {
+			parts := strings.Split(tab.ObjectID, ".")
+			if len(parts) == 2 {
+				return parts[0], parts[1]
 			}
 		}
 	}
+	if a.currentTable != "" {
+		parts := strings.Split(a.currentTable, ".")
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+	return "", ""
+}
+
+// checkLazyLoad checks if we need to load more data and returns a command if so
+func (a *App) checkLazyLoad() tea.Cmd {
+	activeTable := a.getActiveTableView()
+	if activeTable == nil {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+
+	// Check if we need to load more data (lazy loading)
+	if activeTable.SelectedRow >= len(activeTable.Rows)-10 &&
+		len(activeTable.Rows) < activeTable.TotalRows &&
+		!activeTable.IsPaginating {
+
+		schema, table := a.getActiveSchemaTable()
+		if schema != "" && table != "" {
+			activeTable.IsPaginating = true
+			offset := len(activeTable.Rows)
+
+			if a.resultTabs.HasTabs() {
+				// For tab-based views, use prefetch path (PrefetchCompleteMsg
+				// appends to the active table view without routing issues)
+				cmds = append(cmds, func() tea.Msg {
+					return messages.PrefetchDataMsg{
+						Schema:     schema,
+						Table:      table,
+						Offset:     offset,
+						Limit:      100,
+						SortColumn: activeTable.GetSortColumn(),
+						SortDir:    activeTable.GetSortDirection(),
+						NullsFirst: activeTable.GetNullsFirst(),
+					}
+				})
+			} else {
+				// For main table view, use the existing LoadTableData path
+				cmds = append(cmds, func() tea.Msg {
+					return messages.LoadTableDataMsg{
+						Schema:     schema,
+						Table:      table,
+						Offset:     offset,
+						Limit:      100,
+						SortColumn: activeTable.GetSortColumn(),
+						SortDir:    activeTable.GetSortDirection(),
+						NullsFirst: activeTable.GetNullsFirst(),
+					}
+				})
+			}
+		}
+	}
+
+	// Check if prefetch is needed
+	if cmd := a.checkAndTriggerPrefetch(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	if len(cmds) > 0 {
+		return tea.Batch(cmds...)
+	}
 	return nil
+}
+
+// PrefetchData prefetches table data in background
+func (a *App) PrefetchData(schema, table string, offset, limit int, sortCol, sortDir string, nullsFirst bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return messages.PrefetchCompleteMsg{Err: err}
+		}
+
+		var sort *metadata.SortOptions
+		if sortCol != "" {
+			sort = &metadata.SortOptions{
+				Column:     sortCol,
+				Direction:  sortDir,
+				NullsFirst: nullsFirst,
+			}
+		}
+
+		data, err := metadata.QueryTableData(ctx, conn.Pool, schema, table, offset, limit, sort)
+		if err != nil {
+			return messages.PrefetchCompleteMsg{Err: err}
+		}
+
+		return messages.PrefetchCompleteMsg{
+			Rows:   data.Rows,
+			Offset: offset,
+		}
+	}
+}
+
+// checkAndTriggerPrefetch checks if prefetch is needed and returns command
+func (a *App) checkAndTriggerPrefetch() tea.Cmd {
+	activeTable := a.getActiveTableView()
+	if activeTable == nil || !activeTable.NeedsPrefetch() {
+		return nil
+	}
+
+	// Parse current table (schema.table format)
+	parts := strings.Split(a.currentTable, ".")
+	if len(parts) != 2 {
+		return nil
+	}
+
+	offset := len(activeTable.Rows)
+	limit := 100 // default prefetch batch size
+	if offset+limit > activeTable.TotalRows {
+		limit = activeTable.TotalRows - offset
+	}
+	if limit <= 0 {
+		return nil
+	}
+
+	activeTable.IsPrefetching = true
+
+	return func() tea.Msg {
+		return messages.PrefetchDataMsg{
+			Schema:     parts[0],
+			Table:      parts[1],
+			Offset:     offset,
+			Limit:      limit,
+			SortColumn: activeTable.GetSortColumn(),
+			SortDir:    activeTable.GetSortDirection(),
+			NullsFirst: activeTable.GetNullsFirst(),
+		}
+	}
 }
 
 // getActiveTableView returns the appropriate TableView based on current context:
@@ -1966,9 +2101,11 @@ func (a *App) renderNormalView() string {
 	topBarRight := styles.topBarHelp.Render("? ") + styles.topBarHelpText.Render("help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	// Create modern top bar with subtle border (width needs to be dynamic)
+	// Create modern top bar with subtle border
+	// Width must account for border: lipgloss Width() sets content area,
+	// border chars are added outside, so subtract border width (2) to avoid overflow
 	topBar := lipgloss.NewStyle().
-		Width(a.state.Width).
+		Width(a.state.Width - 2).
 		Background(lipgloss.Color("#313244")).
 		Foreground(lipgloss.Color("#cdd6f4")).
 		Border(lipgloss.RoundedBorder()).
@@ -2015,7 +2152,11 @@ func (a *App) renderNormalView() string {
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("Ctrl+E") + styles.dimStyle.Render(" sql") +
 			styles.separatorStyle.Render(" │ ") +
-			styles.keyStyle.Render("p") + styles.dimStyle.Render(" preview")
+			styles.keyStyle.Render("p") + styles.dimStyle.Render(" preview") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("*") + styles.dimStyle.Render(" pin") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("'") + styles.dimStyle.Render(" goto pin")
 	}
 
 	// Add filter indicator if active
@@ -2057,9 +2198,10 @@ func (a *App) renderNormalView() string {
 
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	// Create modern bottom bar (width needs to be dynamic)
+	// Create modern bottom bar
+	// Width must account for border: subtract border width (2) to avoid overflow
 	bottomBar := lipgloss.NewStyle().
-		Width(a.state.Width).
+		Width(a.state.Width - 2).
 		Background(lipgloss.Color("#313244")).
 		Foreground(lipgloss.Color("#cdd6f4")).
 		Border(lipgloss.RoundedBorder()).
@@ -2768,8 +2910,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				if zone.Get(zoneID).InBounds(msg) {
 					if activeTable := a.getActiveTableView(); activeTable != nil {
 						needsLazyLoad := activeTable.ScrollViewport(3) // Scroll down
-						// Check for lazy loading (only for main table browsing)
-						if needsLazyLoad && !a.resultTabs.HasTabs() {
+						if needsLazyLoad {
 							if cmd := a.checkLazyLoad(); cmd != nil {
 								return a, cmd
 							}
@@ -2788,8 +2929,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if zone.Get(zoneID).InBounds(msg) {
 				if activeTable := a.getActiveTableView(); activeTable != nil {
 					needsLazyLoad := activeTable.ScrollViewport(3) // Scroll down
-					// Check for lazy loading (only for main table browsing)
-					if needsLazyLoad && !a.resultTabs.HasTabs() {
+					if needsLazyLoad {
 						if cmd := a.checkLazyLoad(); cmd != nil {
 							return a, cmd
 						}
