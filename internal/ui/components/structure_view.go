@@ -46,8 +46,9 @@ type StructureView struct {
 	pool   *connection.Pool
 
 	// Status
-	loading      bool
-	errorMessage string
+	loading        bool
+	metadataLoaded bool // Whether columns/constraints/indexes have been loaded
+	errorMessage   string
 }
 
 // NewStructureView creates a new structure view
@@ -241,6 +242,28 @@ func (sv *StructureView) formatIndexProperties(idx models.IndexInfo) string {
 	return strings.Join(props, ", ")
 }
 
+// NeedsMetadata returns true if structure metadata has not been loaded yet
+func (sv *StructureView) NeedsMetadata() bool {
+	return !sv.metadataLoaded && !sv.loading
+}
+
+// SetMetadata populates the columns/constraints/indexes tables with pre-loaded data
+func (sv *StructureView) SetMetadata(columns []models.ColumnDetail, constraints []models.Constraint, indexes []models.IndexInfo) {
+	sv.columnsData = columns
+	sv.setColumnsTableData(columns)
+	sv.constraintsData = constraints
+	sv.setConstraintsTableData(constraints)
+	sv.indexesData = indexes
+	sv.setIndexesTableData(indexes)
+	sv.metadataLoaded = true
+	sv.loading = false
+}
+
+// SetMetadataLoading marks that metadata is being loaded
+func (sv *StructureView) SetMetadataLoading() {
+	sv.loading = true
+}
+
 // SwitchTab switches to a specific tab
 func (sv *StructureView) SwitchTab(tabIndex int) {
 	if tabIndex >= 0 && tabIndex <= 3 {
@@ -340,18 +363,6 @@ func (sv *StructureView) GetTableView() *TableView {
 
 // View renders the structure view
 func (sv *StructureView) View() string {
-	if sv.loading {
-		return lipgloss.NewStyle().
-			Foreground(sv.Theme.Metadata).
-			Render("Loading structure...")
-	}
-
-	if sv.errorMessage != "" {
-		return lipgloss.NewStyle().
-			Foreground(sv.Theme.Error).
-			Render(sv.errorMessage)
-	}
-
 	var b strings.Builder
 
 	// Render tab bar
@@ -375,12 +386,26 @@ func (sv *StructureView) View() string {
 	switch sv.activeTab {
 	case 0:
 		b.WriteString(sv.tableView.View())
-	case 1:
-		b.WriteString(sv.columnsTable.View())
-	case 2:
-		b.WriteString(sv.constraintsTable.View())
-	case 3:
-		b.WriteString(sv.indexesTable.View())
+	case 1, 2, 3:
+		// Show loading state only for metadata tabs
+		if sv.loading {
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(sv.Theme.Metadata).
+				Render("Loading structure..."))
+		} else if sv.errorMessage != "" {
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(sv.Theme.Error).
+				Render(sv.errorMessage))
+		} else {
+			switch sv.activeTab {
+			case 1:
+				b.WriteString(sv.columnsTable.View())
+			case 2:
+				b.WriteString(sv.constraintsTable.View())
+			case 3:
+				b.WriteString(sv.indexesTable.View())
+			}
+		}
 	default:
 		b.WriteString("Unknown tab")
 	}

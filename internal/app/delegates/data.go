@@ -41,6 +41,9 @@ func (d *DataDelegate) Update(msg tea.Msg, app AppAccess) (bool, tea.Cmd) {
 
 	case messages.PrefetchCompleteMsg:
 		return d.handlePrefetchComplete(msg, app)
+
+	case messages.StructureMetadataLoadedMsg:
+		return d.handleStructureMetadataLoaded(msg, app)
 	}
 
 	return false, nil
@@ -112,6 +115,24 @@ func (d *DataDelegate) handleTabTableDataLoaded(msg messages.TabTableDataLoadedM
 	}
 	app.SetFocusArea(models.FocusDataPanel)
 	app.UpdatePanelStyles()
+	return true, nil
+}
+
+// handleStructureMetadataLoaded handles structure metadata loading completion.
+func (d *DataDelegate) handleStructureMetadataLoaded(msg messages.StructureMetadataLoadedMsg, app AppAccess) (bool, tea.Cmd) {
+	resultTabs := app.GetResultTabs()
+
+	tab := resultTabs.GetTabByObjectID(msg.ObjectID)
+	if tab == nil || tab.Structure == nil {
+		return true, nil
+	}
+
+	if msg.Err != nil {
+		log.Printf("Warning: failed to load structure metadata for %s: %v", msg.ObjectID, msg.Err)
+		return true, nil
+	}
+
+	tab.Structure.SetMetadata(msg.Columns, msg.Constraints, msg.Indexes)
 	return true, nil
 }
 

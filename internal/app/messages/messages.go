@@ -118,6 +118,15 @@ type TabTableDataLoadedMsg struct {
 	Err       error
 }
 
+// StructureMetadataLoadedMsg is sent when table structure metadata is loaded
+type StructureMetadataLoadedMsg struct {
+	ObjectID    string // schema.table identifier for routing to correct tab
+	Columns     []models.ColumnDetail
+	Constraints []models.Constraint
+	Indexes     []models.IndexInfo
+	Err         error
+}
+
 // SearchTableMsg requests searching within a table
 type SearchTableMsg struct {
 	Query string

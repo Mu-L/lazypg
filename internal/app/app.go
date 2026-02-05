@@ -1004,6 +1004,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if activeTab != nil && activeTab.Type == components.TabTypeTableData && activeTab.Structure != nil {
 					tabIndex := int(msg.String()[0] - '1') // Convert "1"-"4" to 0-3
 					activeTab.Structure.SwitchTab(tabIndex)
+					// Trigger metadata loading for Columns/Constraints/Indexes tabs
+					if tabIndex >= 1 {
+						if cmd := a.triggerStructureMetadataLoad(activeTab.Structure, activeTab.ObjectID); cmd != nil {
+							return a, cmd
+						}
+					}
 					return a, nil
 				}
 				// Legacy: also handle global structure view
@@ -2831,11 +2837,20 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Handle structure view tabs (when a table is selected, structure view is shown)
-	if a.currentTable != "" {
+	// Handle structure view tabs (for result tabs or legacy structure view)
+	if activeTab := a.resultTabs.GetActiveTab(); activeTab != nil && activeTab.Type == components.TabTypeTableData && activeTab.Structure != nil {
+		handled, tabIndex := activeTab.Structure.HandleMouseClick(msg)
+		if handled {
+			if tabIndex >= 1 {
+				if cmd := a.triggerStructureMetadataLoad(activeTab.Structure, activeTab.ObjectID); cmd != nil {
+					return a, cmd
+				}
+			}
+			return a, nil
+		}
+	} else if a.currentTable != "" {
 		handled, tabIndex := a.structureView.HandleMouseClick(msg)
 		if handled {
-			// Sync a.currentTab with the clicked tab
 			if tabIndex >= 0 {
 				a.currentTab = tabIndex
 			}
@@ -4236,6 +4251,56 @@ func (a *App) loadTableDataForTab(schema, table, objectID string) tea.Cmd {
 			TotalRows: int(data.TotalRows),
 		}
 	}
+}
+
+// loadStructureMetadata loads columns, constraints, and indexes for a table asynchronously
+func (a *App) loadStructureMetadata(schema, table, objectID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return messages.StructureMetadataLoadedMsg{ObjectID: objectID, Err: fmt.Errorf("no active connection: %w", err)}
+		}
+
+		columns, err := metadata.GetColumnDetails(ctx, conn.Pool, schema, table)
+		if err != nil {
+			return messages.StructureMetadataLoadedMsg{ObjectID: objectID, Err: err}
+		}
+
+		constraints, err := metadata.GetConstraints(ctx, conn.Pool, schema, table)
+		if err != nil {
+			return messages.StructureMetadataLoadedMsg{ObjectID: objectID, Err: err}
+		}
+
+		indexes, err := metadata.GetIndexes(ctx, conn.Pool, schema, table)
+		if err != nil {
+			return messages.StructureMetadataLoadedMsg{ObjectID: objectID, Err: err}
+		}
+
+		return messages.StructureMetadataLoadedMsg{
+			ObjectID:    objectID,
+			Columns:     columns,
+			Constraints: constraints,
+			Indexes:     indexes,
+		}
+	}
+}
+
+// triggerStructureMetadataLoad checks if the active tab needs metadata and triggers loading.
+// Returns a command if loading was triggered, nil otherwise.
+func (a *App) triggerStructureMetadataLoad(structure *components.StructureView, objectID string) tea.Cmd {
+	if structure == nil || !structure.NeedsMetadata() {
+		return nil
+	}
+
+	parts := strings.Split(objectID, ".")
+	if len(parts) != 2 {
+		return nil
+	}
+
+	structure.SetMetadataLoading()
+	return a.loadStructureMetadata(parts[0], parts[1], objectID)
 }
 
 // loadTableDataWithFilter loads table data with an applied filter
