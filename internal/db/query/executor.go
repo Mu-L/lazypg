@@ -79,6 +79,9 @@ func convertValueToString(val interface{}) string {
 			return fmt.Sprintf("%v", val)
 		}
 		return string(jsonBytes)
+	case [16]byte:
+		// UUID from PostgreSQL
+		return fmt.Sprintf("%x-%x-%x-%x-%x", v[:4], v[4:6], v[6:8], v[8:10], v[10:])
 	case []byte:
 		// Might be raw JSON bytes
 		return string(v)
