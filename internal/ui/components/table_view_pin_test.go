@@ -128,7 +128,7 @@ func TestTableView_IsPinned(t *testing.T) {
 	tv.SetData(columns, rows, 3)
 
 	tv.SelectedRow = 1
-	tv.TogglePin()
+	_ = tv.TogglePin()
 
 	if !tv.IsPinned(1) {
 		t.Fatal("row 1 should be pinned")
@@ -153,9 +153,9 @@ func TestTableView_ClearPins(t *testing.T) {
 
 	// Pin multiple rows
 	tv.SelectedRow = 0
-	tv.TogglePin()
+	_ = tv.TogglePin()
 	tv.SelectedRow = 1
-	tv.TogglePin()
+	_ = tv.TogglePin()
 
 	if tv.GetPinnedCount() != 2 {
 		t.Fatalf("expected 2 pinned rows, got %d", tv.GetPinnedCount())
